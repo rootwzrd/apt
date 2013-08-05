@@ -7,11 +7,11 @@ apt is an installer for Linux. apt does not require root privileges to install s
 
 apt follows semantic versioning, where `major` represents an incompatible API change, `minor` an implementation, and `patch` a bug fix. Still conformly to semantic versioning, we use tags. Tags reflect the workflow of a feature from incubation to delivery. Tags are:
 
- - dev
- - test
- - stable
+- dev
+- test
+- stable
 
-* **Note:** stable tag is omitted for readibility.
+**Note:** stable tag is omitted for readibility.
 
 # Version 0 - Alpha
 
