@@ -24,3 +24,7 @@ apt is an installer for Linux. apt does not require root privileges to install s
 ## Resolve a module semantic version
 
     apt version <module> <semantic version>
+    
+## Install a module
+
+    apt install <module> [latest | <release> | <semantic version>]
