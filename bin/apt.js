@@ -117,7 +117,7 @@ var get = function (filter, then) {
   );
 };
 
-var search = function (filter, then) {
+var lab = function (filter, then) {
   if ( typeof filter == 'string' ) {
     filter = { name: filter };
   }
@@ -160,7 +160,7 @@ var install = function (pkg, version, then) {
               then(err);
             } else {
               if ( ! packages.length ) {
-                search(pkg,
+                lab(pkg,
                   function (err, lab) {
                     if ( err ) {
                       then(err);
@@ -172,8 +172,8 @@ var install = function (pkg, version, then) {
                           var vendor    = download.github.vendor,
                             repo        = download.github.repo,
                             prefix      = download.github.prefix,
-                            from        = 'https://github.com/'+vendor+'/'+repo+'/archive/'
-                                          + prefix+release+'.tar.gz',
+                            from        = 'https://github.com/'+vendor+'/'+repo+'/archive/'+
+                                            prefix+release+'.tar.gz',
                             sourcePath  = path + '/sources/' + pkg,
                             to          = pkg + '-' + release + '.tar.gz',
                             distTag     = (+new Date()).toString() + Math.random().toString();
@@ -225,11 +225,11 @@ var install = function (pkg, version, then) {
         );
       }
     }
-  ); 
+  );
 };
 
 var getLatest = function (filter, then) {
-  search(filter,
+  lab(filter,
     function (err, packages) {
       if ( err ) {
         throw err;
@@ -435,7 +435,7 @@ var sortVersions = function (versions) {
     }
   }
   return sort;
-}
+};
 
 for ( var i = 2,
           action = 'ls',
@@ -504,8 +504,8 @@ switch ( action ) {
       }
     );
     break;
-  case 'search':
-    search(package,
+  case 'lab':
+    lab(package,
       function (err, lab) {
         if ( err ) {
           throw err;
