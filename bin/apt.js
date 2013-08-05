@@ -185,11 +185,11 @@ var install = function (pkg, version, then) {
                               FS.exists(sourcePath + '/' + to,
                                 function (exists) {
                                   if ( ! exists ) {
-                                    wget(from, sourcePath + '/' + to,
-                                      function () {
-                                        console.log(arguments);
-                                      }
-                                    );
+                                    // wget(from, sourcePath + '/' + to,
+                                    //   function () {
+                                    //     console.log(arguments);
+                                    //   }
+                                    // );
                                     // WGET.download('https://codeload.github.com/joyent/node/tar.gz/v0.10.15', to)
                                       // .on('error',
                                       //   function (err) {
@@ -476,7 +476,7 @@ switch ( action ) {
         if ( err ) {
           throw err;
         }
-        console.log(latest)
+        console.log(latest);
       });
     break;
   case 'versions':
