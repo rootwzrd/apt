@@ -18,3 +18,46 @@ apt is an installer for Linux. apt does not require root privileges to install s
             }
         }
     }
+
+## Latest
+
+How to find module's latest version. Expects one of the following:
+
+ - scrape
+
+## Expose
+
+How to get all distributed versions from module. Expects one of the following:
+
+ - scrape
+ - json
+
+## Download
+
+Expects one of the following:
+
+ - github
+
+## Scrape
+
+    {
+      "from": String, // URL
+      "search": RegExp, // Regular Expression
+      "extract": Number, // What to extrcat from regular expression
+    }
+
+## Github
+
+    {
+        "vendor": String,
+        "repo": String,
+        "prefix": String
+    }
+
+## JSON
+
+    {
+      "from": String,
+      "select": String,
+      "filter": Array
+    }
