@@ -4,68 +4,133 @@ var ASYNC = require('async'),
   REQUEST = require('request'),
   CP = require('child_process');
 
-var wget = function(from, to, then) {
-  var _wget = CP.spawn('wget',
-    ['-O', to, from],
-    {
-      stdio: 'inherit'
-    });
+var wget = function(from, info, then) {
+  var args = ['--debug'];
+  if ( typeof info == 'object' ) {
+    for ( var key in info ) {
+      switch ( key ) {
+        case 'O':
+        case 'output':
+        case 'target':
+          args.push('-O');
+          args.push(info[key]);
+          break;
+        case 'c':
+        case 'continue':
+        case 'resume':
+          args.push('--continue');
+          break;
+      }
+    }
+  }
+  args.push(from);
+  var wget = CP.spawn('wget', args);
+  wget.on('error',
+    function (err) {
+      console.log({'wget error': err});
+    }
+  );
+  wget.on('close',
+    function (code) {
+      if ( code !== 0 ) {
+        then(new Error('wget failed with error code ' + code));
+      }
+    }
+  );
+  wget.on('exit',
+    function (signal) {
+      console.log({'wget exit signal': signal});
+    }
+  );
+  wget.stderr.setEncoding('utf-8');
+  wget.stderr.on('data',
+    function (data) {
+      console.log({'wget stderr': data});
+    }
+  );
 };
 
 var path = PATH.dirname(__dirname);
 
-var download_ = function (url, local, then) {
-  var stream = FS.createWriteStream(local),
-    size = 0,
-    diff = 0,
-    seconds = 0,
-    streaming = true,
-    progress = function () {
-      FS.stat(stream.path,
-        function (err, stat) {
-          if ( err ) {
-            then(err);
+var downloadFromGitHub = function (info, then) {
+  if ( typeof info != 'object' ) {
+    then(new Error('Downloading from github failed: info must be an object'));
+  } else {
+    var vendor = info.vendor,
+      repo = info.repo,
+      release = info.release,
+      prefix = ((info.prefix) ? info.prefix : '');
+    if ( ! vendor ) {
+      then(new Error('Downloading from github failed: missing vendor'));
+    } else if ( ! repo ) {
+      then(new Error('Downloading from github failed: missing repo'));
+    } else if ( ! release ) {
+      then(new Error('Downloading from github failed: missing release'));
+    } else {
+      var dlpath = path + '/sources/' + repo;
+      FS.exists(dlpath,
+        function (exists) {
+          if ( ! exists ) {
+            FS.mkdir(dlpath,
+              function (err) {
+                if ( err ) {
+                  then(err);
+                } else {
+                  downloadFromGitHub(info, then);
+                }
+              }
+            );
           } else {
-            seconds ++;
-            if ( streaming ) {
-              diff = stat.size - size;
-              size = stat.size;
-              console.log((Math.round((size / 1024 / 1024) * 100) / 100) + ' Mb, ' +
-                (Math.round((diff / 1024) * 100) / 100) + ' Kb/s');
-              setTimeout(progress, 1000);
-            }
+            var saveAs = repo + '-' + release + '.tar.gz',
+              git = CP.spawn('git',[
+                  'clone',
+                  'https://github.com/' + vendor + '/' + repo + '.git',
+                  release ], {
+                  cwd: dlpath
+                }
+              );
+            git.on('error',
+              function (code) {
+                console.log({'got code from downloading from github': code});
+              }
+            );
+            git.stderr.on('data',
+              function (data) {
+                console.log({'Downloading from github (stderr)': data.toString()});
+              }
+            );
+            git.stdout.on('data',
+              function (data) {
+                console.log({'Downloading from github (stdout)': data.toString()});
+              }
+            );
+
+            // new Download(
+            //   'https://github.com/' + vendor + '/' + repo + '/archive/' +
+            //     prefix + release + '.tar.gz',
+            //   dlpath + '/' + saveAs,
+            //   function (err, res) {
+            //     if ( err ) {
+            //       then(err);
+            //     } else {
+            //       console.log({'Got result from wget': res});
+            //     }
+            //   }
+            // );
+            // FS.exists(dlpath + '/' + saveAs,
+            //   function (exists) {
+            //     if ( exists ) {
+            //       console.log('Already downloaded!');
+            //     } else {
+
+            //     }
+            //   }
+            // );
           }
         }
       );
-    };
-  console.log('downloading '+url);
-  REQUEST(url,
-    function (err, res, data) {
-      if ( err ) {
-        then(err);
-      } else {
-        if ( res.statusCode == 200 ) {
-          streaming = false;
-          FS.stat(stream.path,
-            function (err, stat) {
-              if ( err ) {
-                then(err);
-              } else {
-                console.log('Done: downloaded ' +
-                  (Math.round((stat.size / 1024 / 1024) * 100) / 100) + ' Mb at '
-                  + (Math.round(((stat.size / seconds) / 1024) * 100) / 100) + ' Kb/s from '
-                  + url + ' to ' + local
-                );
-                then(null, res, data);
-              }
-            }
-          );
-        } else {
-          then(new Error('Download failed with status ' + res.statusCode));
-        }
-      }
-    }).pipe(stream);
-  progress();
+    }
+  }
 };
 
 var $db = null;
@@ -80,7 +145,8 @@ var db = function (then) {
           $db = db;
           then(null, $db);
         }
-      })
+      }
+    );
   } else {
     then(null, $db);
   }
@@ -118,6 +184,8 @@ var get = function (filter, then) {
 };
 
 var lab = function (filter, then) {
+  console.log({'searching lab for': filter});
+
   if ( typeof filter == 'string' ) {
     filter = { name: filter };
   }
@@ -136,6 +204,7 @@ var lab = function (filter, then) {
                   if ( err ) {
                     then(err);
                   } else {
+                    console.log({'Lab returned': { results: results.length, "for": filter }});
                     then(null, results);
                   }
                 }
@@ -148,87 +217,149 @@ var lab = function (filter, then) {
   );
 };
 
-var install = function (pkg, version, then) {
-  getVersion(pkg, version,
-    function (err, release) {
-      if (err) {
-        then(err);
-      } else {
-        get(pkg,
-          function (err, packages) {
-            if ( err ) {
-              then(err);
+var install = function (pkg, version, then, step) {
+  step = isNaN(step) ? 1 : step;
+
+  console.log({installing: { pkg: pkg, version: version, step: step }});
+
+  var release = version,
+    path = PATH.dirname(__dirname);
+  
+  if ( typeof release != 'string' ||
+      ! release.match(/^\d+\.\d+\.\d+$/) ) {
+    return getVersion(pkg, version,
+      function (err, release) {
+        if ( err ) then(err);
+        else {
+          install(pkg, release, then);
+        }
+      }
+    );
+  }
+
+  switch ( step ) {
+    /* 1) get package profile from lab */
+    case 1:
+      lab(pkg,
+        function (err, packages) {
+          if ( err ) then(err);
+          else {
+            if ( ! packages.length ) {
+              then(new Error('No package found for ' + pkg));
             } else {
-              if ( ! packages.length ) {
-                lab(pkg,
-                  function (err, lab) {
-                    if ( err ) {
-                      then(err);
-                    } else {
-                      var download = lab[0].install.download,
-                        downloadMethod = Object.keys(download)[0];
-                      switch ( downloadMethod ) {
-                        case 'github':
-                          var vendor    = download.github.vendor,
-                            repo        = download.github.repo,
-                            prefix      = download.github.prefix,
-                            from        = 'https://github.com/'+vendor+'/'+repo+'/archive/'+
-                                            prefix+release+'.tar.gz',
-                            sourcePath  = path + '/sources/' + pkg,
-                            to          = pkg + '-' + release + '.tar.gz',
-                            distTag     = (+new Date()).toString() + Math.random().toString();
-                          FS.exists(sourcePath,
-                            function (exists) {
-                              if ( ! exists ) {
-                                FS.mkdirSync(sourcePath);
-                              }
-                              FS.exists(sourcePath + '/' + to,
-                                function (exists) {
-                                  if ( ! exists ) {
-                                    // wget(from, sourcePath + '/' + to,
-                                    //   function () {
-                                    //     console.log(arguments);
-                                    //   }
-                                    // );
-                                    // WGET.download('https://codeload.github.com/joyent/node/tar.gz/v0.10.15', to)
-                                      // .on('error',
-                                      //   function (err) {
-                                      //     then(err);
-                                      //   }
-                                      // )
-                                      // .on('end',
-                                      //   function (output) {
-                                      //     console.log('done');
-                                      //   }
-                                      // )
-                                      // .on('progress',
-                                      //   function (progress) {
-                                      //     console.log(progress);
-                                      //   }
-                                      // );
-                                  } else {
-                                    console.log('sources zip already downloaded');
+              install(packages[0], release, then, 2);
+            }
+          }
+        }
+      );
+      break;
+    /* 2) create directory structure if needed */
+    case 2:
+      var dirpath = path + '/sources/' + pkg.name;
+      FS.exists(dirpath,
+        function (exists) {
+          if ( ! exists ) {
+            console.log({installing: { 'creating directory': dirpath }});
+            FS.mkdir(dirpath,
+              function (err) {
+                if ( err ) then(err);
+                else {
+                  install(pkg, release, then, step);
+                }
+              }
+            );
+          } else {
+            var releaseDir = dirpath + '/' + release;
+            FS.exists(releaseDir,
+              function (exists) {
+                if ( ! exists ) {
+                  install(pkg, release, then, 3);
+                } else {
+                  var modulePath = path + '/modules/' + pkg.name;
+                  FS.exists(modulePath,
+                    function (exists) {
+                      if ( ! exists) {
+                        FS.mkdir(modulePath,
+                          function (err) {
+                            if ( err ) then(err);
+                            else {
+                              install(pkg, release, then, step);
+                            }
+                          }
+                        );
+                      } else {
+                        var releasePath = modulePath + '/' + version;
+                        FS.exists(releasePath,
+                          function (exists) {
+                            if ( ! exists ) {
+                              FS.mkdir(releasePath,
+                                function (err) {
+                                  if ( err ) then(err);
+                                  else {
+                                    install(pkg, release, then, step);
                                   }
                                 }
                               );
-                                    
+                            } else {
+                              var ls = CP.spawn('ls', [releasePath]),
+                                files = [];
+                              ls.on('error',
+                                function (err) {
+                                  then(err);
+                                }
+                              );
+                              ls.stdout.setEncoding('utf-8');
+                              ls.stdout.on('data',
+                                function (data) {
+                                  files.push(data.trim());
+                                }
+                              );
+                              ls.on('close',
+                                function (code) {
+                                  if ( files.length ) {
+                                    then(new Error('Already installed'));
+                                  }
+                                }
+                              );
                             }
-                          );
-                          break;
+                          }
+                        );
                       }
                     }
-                  }
-                );
+                  );
+                }
+              }
+            );
+          }
+        }
+      );
+      break;
+    /* 3) download module sources if needed */
+    case 3:
+      console.log({installing: 'downloading'});
+      for ( var downloadMethod in pkg.install.download );
+      switch ( downloadMethod ) {
+        case 'github':
+          var github = pkg.install.download.github;
+          github.release =  version;
+          downloadFromGitHub(github,
+            function (err, response) {
+              if ( err ) then(err);
+              else {
+                console.log({'got response from git': response});
               }
             }
-          }
-        );
+          );
+          break;
       }
-    }
-  );
+      break;
+    /* 4) compile module source */
+    /* 5) update station database */
+  }
 };
 
 var getLatest = function (filter, then) {
+  console.log({'gettling latest version of': filter});
   lab(filter,
     function (err, packages) {
       if ( err ) {
@@ -259,6 +390,7 @@ var getLatest = function (filter, then) {
                     if ( ! matches[extract] ) {
                       throw new Error('Could not fetch latest version');
                     }
+                    console.log({'Got latest version of': filter, 'which is': matches[extract]});
                     then(null, matches[extract]);
                   });
                 }
@@ -271,10 +403,11 @@ var getLatest = function (filter, then) {
       );
     }
   );
-}
+};
 
 var getVersions = function (filter, then) {
-  search(filter,
+  console.log({'exposing versions of': filter});
+  lab(filter,
     function (err, packages) {
       if ( err ) {
         throw err;
@@ -346,9 +479,11 @@ var getVersions = function (filter, then) {
       );
     }
   );
-}
+};
 
 var getVersion = function (pkg, version, then) {
+  console.log({'resolving version of': {pkg:pkg, version:version}});
+
   if ( ! version || version == 'latest' ) {
     getLatest({name: pkg}, then);
   } else {
@@ -437,21 +572,47 @@ var sortVersions = function (versions) {
   return sort;
 };
 
-for ( var i = 2,
-          action = 'ls',
-          package = {}; i < process.argv.length; i ++ ) {
-  if ( i == 2 ) {
-    action = process.argv[i];
-  }
-  if ( i == 3 ) {
-    package.name = process.argv[i];
-  }
-}
+var shasum = function (module, version) {
+  lab(module,
+    function (err, modules) {
+      if ( err ) then(err);
+      else {
+        var shasum = modules[0].shasum;
+        getVersion(module, version,
+          function (err, version) {
+            if ( err ) then(err);
+            else {
+              shasum.scrape = shasum.scrape.replace(/\{\{version\}\}/g, version);
+              shasum.search = shasum.search.replace(/\{\{version\}\}/g, version.replace(/\./g, '\\.'));
+              scrape(shasum,
+                function (err, response) {
+                  if ( err ) then(err);
+                  else {
+                    console.log(response);
+                  }
+                }
+              );
+            }
+          }
+        );
+      }
+    }
+  );
+};
+
+var scrape = function (scraper, then) {
+  //
+};
+
+var action = process.argv[2],
+  module = process.argv[3],
+  version = process.argv[4];
 
 switch ( action ) {
   case 'help':
   case '--help':
   case '-h':
+  default:
     db(
       function (err, db) {
         db.collection('readme',
@@ -471,7 +632,7 @@ switch ( action ) {
     );
     break;
   case 'latest':
-    getLatest(package,
+    getLatest(pkg,
       function (err, latest) {
         if ( err ) {
           throw err;
@@ -479,8 +640,18 @@ switch ( action ) {
         console.log(latest);
       });
     break;
+  case 'shasum':
+    shasum(module, version,
+      function (err, shasum) {
+        if ( err ) then(err);
+        else {
+          console.log(shasum);
+        }
+      }
+    );
+    break;
   case 'versions':
-    getVersions(package,
+    getVersions(pkg,
       function (err, versions) {
         if ( err ) {
           throw err;
@@ -493,7 +664,7 @@ switch ( action ) {
     var pkg = process.argv[3],
       version = process.argv[4];
     if ( ! pkg ) {
-      throw new Error('Missing package to evaluate version from');
+      throw new Error('Missing pkg to evaluate version from');
     }
     getVersion(pkg, version,
       function (err, version) {
@@ -505,7 +676,7 @@ switch ( action ) {
     );
     break;
   case 'lab':
-    lab(package,
+    lab(pkg,
       function (err, lab) {
         if ( err ) {
           throw err;
