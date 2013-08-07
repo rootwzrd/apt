@@ -1,8 +1,14 @@
+require('colors');
+
 var ASYNC = require('async'),
   FS = require('fs'),
   PATH = require('path'),
   REQUEST = require('request'),
   CP = require('child_process');
+
+var echo = function (message) {
+  console.warn(JSON.stringify(message, null, 0).grey.bold);
+};
 
 var wget = function(from, info, then) {
   var args = ['--debug'];
@@ -153,6 +159,7 @@ var db = function (then) {
 };
 
 var get = function (filter, then) {
+  echo({'get from station': filter});
   if ( typeof filter == 'string' ) {
     filter = { name: filter };
   }
@@ -184,7 +191,7 @@ var get = function (filter, then) {
 };
 
 var lab = function (filter, then) {
-  console.log({'searching lab for': filter});
+  echo({'searching lab for': filter});
 
   if ( typeof filter == 'string' ) {
     filter = { name: filter };
@@ -204,7 +211,7 @@ var lab = function (filter, then) {
                   if ( err ) {
                     then(err);
                   } else {
-                    console.log({'Lab returned': { results: results.length, "for": filter }});
+                    echo({'Lab returned': { results: results.length, "for": filter }});
                     then(null, results);
                   }
                 }
@@ -359,7 +366,7 @@ var install = function (pkg, version, then, step) {
 };
 
 var getLatest = function (filter, then) {
-  console.log({'gettling latest version of': filter});
+  echo({'getting latest version of': filter});
   lab(filter,
     function (err, packages) {
       if ( err ) {
@@ -374,29 +381,46 @@ var getLatest = function (filter, then) {
           var method = Object.keys(pkg.latest)[0];
           switch ( method ) {
             case 'scrape':
-              var from = pkg.latest.scrape.from,
-                regex = new RegExp(pkg.latest.scrape.search),
-                extract = pkg.latest.scrape.extract;
-              require('http').get(from,
-                function (res) {
-                  var response = '';
-                  res.on('data',
-                    function (data) {
-                      response += data.toString();
-                    }
-                  );
-                  res.on('end', function () {
-                    var matches = response.match(regex);
-                    if ( ! matches[extract] ) {
-                      throw new Error('Could not fetch latest version');
-                    }
-                    console.log({'Got latest version of': filter, 'which is': matches[extract]});
-                    then(null, matches[extract]);
-                  });
+              scrape({
+                  from: pkg.latest.scrape.from,
+                  search: pkg.latest.scrape.search,
+                  extract: pkg.latest.scrape.extract
+                },
+                function (err, latest) {
+                  if ( err ) then(err);
+                  else {
+                    shasum(filter, latest,
+                      function (err, shasum) {
+                        if ( err ) then(err);
+                        else {
+                          var response = {};
+                          response[latest] = shasum;
+                          then(null, response);
+                        }
+                      }
+                    );
+                  }
                 }
-              ).on('error', function (err) {
-                throw err;
-              });
+              );
+              // require('http').get(from,
+              //   function (res) {
+              //     var response = '';
+              //     res.on('data',
+              //       function (data) {
+              //         response += data.toString();
+              //       }
+              //     );
+              //     res.on('end', function () {
+              //       var matches = response.match(regex);
+              //       if ( ! matches[extract] ) {
+              //         throw new Error('Could not fetch latest version');
+              //       }
+                      
+              //     });
+              //   }
+              // ).on('error', function (err) {
+              //   throw err;
+              // });
               break;
           }
         }
@@ -406,7 +430,7 @@ var getLatest = function (filter, then) {
 };
 
 var getVersions = function (filter, then) {
-  console.log({'exposing versions of': filter});
+  echo({'exposing versions of': filter});
   lab(filter,
     function (err, packages) {
       if ( err ) {
@@ -482,7 +506,7 @@ var getVersions = function (filter, then) {
 };
 
 var getVersion = function (pkg, version, then) {
-  console.log({'resolving version of': {pkg:pkg, version:version}});
+  echo({'resolving version of': {pkg:pkg, version:version}});
 
   if ( ! version || version == 'latest' ) {
     getLatest({name: pkg}, then);
@@ -572,7 +596,8 @@ var sortVersions = function (versions) {
   return sort;
 };
 
-var shasum = function (module, version) {
+var shasum = function (module, version, then) {
+  echo({'getting shasum for': { module: module, version: version}});
   lab(module,
     function (err, modules) {
       if ( err ) then(err);
@@ -582,16 +607,9 @@ var shasum = function (module, version) {
           function (err, version) {
             if ( err ) then(err);
             else {
-              shasum.scrape = shasum.scrape.replace(/\{\{version\}\}/g, version);
+              shasum.from = shasum.scrape.replace(/\{\{version\}\}/g, version);
               shasum.search = shasum.search.replace(/\{\{version\}\}/g, version.replace(/\./g, '\\.'));
-              scrape(shasum,
-                function (err, response) {
-                  if ( err ) then(err);
-                  else {
-                    console.log(response);
-                  }
-                }
-              );
+              scrape(shasum, then);
             }
           }
         );
@@ -601,7 +619,23 @@ var shasum = function (module, version) {
 };
 
 var scrape = function (scraper, then) {
-  //
+  echo({scraping: scraper});
+  var from = scraper.from,
+    regex = new RegExp(scraper.search),
+    extract = scraper.extract;
+  REQUEST(from,
+    function (err, headers, data) {
+      if ( err ) then(err);
+      else {
+        var matches = data.match(regex);
+        if ( ! matches || ! matches[extract] ) {
+          then(new Error('Scrape failed'));
+        } else {
+          then(null, matches[extract]);
+        }
+      }
+    }
+  );
 };
 
 var action = process.argv[2],
@@ -612,7 +646,6 @@ switch ( action ) {
   case 'help':
   case '--help':
   case '-h':
-  default:
     db(
       function (err, db) {
         db.collection('readme',
@@ -632,13 +665,14 @@ switch ( action ) {
     );
     break;
   case 'latest':
-    getLatest(pkg,
+    getLatest(module,
       function (err, latest) {
         if ( err ) {
           throw err;
         }
         console.log(latest);
-      });
+      }
+    );
     break;
   case 'shasum':
     shasum(module, version,
@@ -686,7 +720,10 @@ switch ( action ) {
       }
     );
     break;
-  case 'ls':
+  case 'station':
+  case '':
+  case null:
+  case undefined:
     get({},
       function (err, packages) {
         if ( err ) {
