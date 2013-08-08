@@ -1,5 +1,409 @@
 require('colors');
 
+var ModelLabModule = function ($object) {
+  for ( var key in $object ) {
+    this[key] = $object[key];
+  }
+};
+
+var ModelRelease = function ($string) {
+  this.toString = function () {
+    return $string;
+  };
+};
+
+var apt = function () {
+  this.conn = null;
+  this.node_modules = {};
+};
+
+apt.prototype.require = function(module) {
+  if ( ! this.node_modules[module] ) {
+    this.echo({require: module});
+    this.node_modules[module] = require(module);
+  }
+  return this.node_modules[module];
+};
+
+apt.prototype.echo = function(message) {
+  console.warn(JSON.stringify(message, null, 0).grey.bold);
+};
+
+apt.prototype.error = function(error, Throw) {
+  console.log(error.toString().red.bold);
+  if ( Throw ) {
+    throw error;
+  }
+};
+
+apt.prototype.db = function(then) {
+  if ( ! this.conn ) {
+    this.echo({db: 'connecting'});
+    require('mongodb').connect('mongodb://localhost:2007/apt',
+      function (err, db) {
+        if ( err ) {
+          then(err);
+        } else {
+          this.echo({db: 'connected'});
+          this.conn = db;
+          then(null, this.conn);
+        }
+      }.bind(this)
+    );
+  } else {
+    then(null, this.conn);
+  }
+};
+
+apt.prototype.station = function(modules, then) {
+  this.echo({station: modules});
+  this.db(
+    function (err, db) {
+      if ( err ) then(err);
+      else {
+        db.collection('station',
+          function (err, station) {
+            if ( err ) then(err);
+            else {
+              station.find(modules)
+                .toArray(then);
+            }
+          }
+        );
+      }
+    }
+  );
+};
+
+apt.prototype.lab = function(modules, then) {
+  this.echo({lab: (modules ? modules : {})});
+  if ( typeof modules == 'string' ) {
+    modules = { name: modules };
+  }
+  this.db(
+    function (err, db) {
+      if ( err ) then(err);
+      else {
+        db.collection('lab',
+          function (err, lab) {
+            if ( err ) then(err);
+            else {
+              lab.find(modules)
+                .toArray(
+                  function (err, modules) {
+                    if ( err ) then(err);
+                    else {
+                      var lab = [];
+                      modules.forEach(
+                        function (module) {
+                          lab.push(new ModelLabModule(module));
+                        }
+                      );
+                      then(null, lab);
+                    }
+                  }
+                );
+            }
+          }
+        );
+      }
+    }
+  );
+};
+
+apt.prototype.latest = function(module, then) {
+  this.echo({latest: (module instanceof ModelLabModule) ? module.name : module});
+  if ( ! (module instanceof ModelLabModule) ) {
+    this.lab(module,
+      function (err, modules) {
+        if ( err ) then(err);
+        else {
+          this.latest(modules[0], then);
+        }
+      }.bind(this)
+    );
+  } else {
+    var latest = module.latest,
+      method = Object.keys(latest)[0];
+    switch ( method ) {
+      case 'scrape':
+        this.scrape({
+            from: latest.scrape.from,
+            search: latest.scrape.search,
+            extract: latest.scrape.extract
+          },
+          function (err, latest) {
+            if ( err ) then(err);
+            else {
+              this.echo({latest: { module: module.name, latest: latest}});
+              this.shasum(module, new ModelRelease(latest),
+                function (err, shasum) {
+                  if ( err ) then(err);
+                  else {
+                    var response = {};
+                    response[latest] = shasum;
+                    then(null, response);
+                  }
+                }
+              );
+            }
+          }.bind(this)
+      );
+    }
+  }
+};
+
+apt.prototype.scrape = function(scraper, then) {
+  this.echo({scrape: scraper});
+  var from = scraper.from,
+    flags = '',
+    group = scraper.group && scraper.group,
+    extract = scraper.extract;
+  if ( group ) {
+    flags += 'g';
+  }
+  var regex = new RegExp(scraper.search, flags);
+  this.require('request')(from,
+    function (err, headers, data) {
+      if ( err ) then(err);
+      else {
+        var matches = data.match(regex);
+        if ( ! matches || ! matches[extract] ) {
+          then(new Error('Scrape failed'));
+        } else {
+          if ( group ) {
+            var g = [], gv;
+            matches.forEach(
+              function (match) {
+                g.push(match.replace(new RegExp(scraper.search), '$' + extract));
+              }
+            );
+            then(null, g);
+          }
+          else {
+            then(null, matches[extract]);
+          }
+        }
+      }
+    }
+  );
+};
+
+apt.prototype.shasum = function(module, version, then) {
+  this.echo({shasum: (module instanceof ModelLabModule) ? module.name : module});
+  if ( ! (module instanceof ModelLabModule) ) {
+    this.lab({name: module},
+      function (err, module) {
+        if ( err ) then(err);
+        else {
+          this.shasum(module, version, then);
+        }
+      }
+    );
+  } else if ( ! (version instanceof ModelRelease) ) {
+    this.version(module, version,
+      function (err, version) {
+        if ( err ) then(err);
+        else {
+          this.shasum(module, version, then);
+        }
+      }.bind(this)
+    );
+  } else {
+    var shasum = module.shasum;
+    shasum.from = shasum.scrape.replace(/\{\{version\}\}/g, version.toString());
+    shasum.search = shasum.search.replace(/\{\{version\}\}/g, version.toString().replace(/\./g, '\\.'));
+    scrape(shasum, then);
+  }
+};
+
+apt.prototype.version = function(module, version, then) {
+  this.echo({version: (module instanceof ModelLabModule) ? module.name : module});
+  if ( ! version || version == 'latest' ) {
+    this.latest(module, then);
+  } else {
+    if ( version.match(/^\d+\.\d+\.\d+$/) ) {
+      this.versions(module,
+        function (err, versions) {
+          if ( err ) {
+            then(err);
+          } else {
+            console.log(versions);
+            if ( versions.indexOf(version) >= 0 ) {
+              then(null, new ModelRelease(version));
+            } else {
+              then(null, null);
+            }
+          }
+        }
+      );
+    } else if ( version.match(/^\d+|x\.\d+|x\.\d+|x$/) ) {
+      this.versions(module,
+        function (err, versions) {
+          if ( err ) {
+            then(err);
+          } else {
+            var chunks = version.split('.'),
+              major = chunks[0] == 'x' ? null : +chunks[0],
+              minor = chunks[1] == 'x' ? null : +chunks[1],
+              patch = chunks[2] == 'x' ? null : +chunks[2],
+              candidates = [];
+            versions.forEach(
+              function (version) {
+                var chunks2 = version.split('.'),
+                  match = true;
+                if ( major ) {
+                  if ( +chunks2[0] != major ) {
+                    match = false;
+                  }
+                }
+                if ( minor ) {
+                  if ( +chunks2[1] != minor ) {
+                    match = false;
+                  }
+                }
+                if ( match ) {
+                  candidates.push(version);
+                }
+              }.bind(this)
+            );
+            then(null,
+              this.sortVersions(candidates).reverse()[0]);
+          }
+        }.bind(this)
+      );
+    }
+  }
+};
+
+apt.prototype.versions = function(module, then) {
+  this.echo({versions: (module instanceof ModelLabModule) ? module.name : module});
+  if ( ! (module instanceof ModelLabModule) ) {
+    this.lab(module,
+      function (err, packages) {
+        if ( err ) {
+          then(err);
+        } else {
+          this.versions(packages[0], version, then);
+        }
+      }.bind(this)
+    );
+  } else {
+    var expose = module.expose,
+      method = Object.keys(expose)[0];
+    this.echo({versions: { method: expose}});
+    switch ( method ) {
+      case 'scrape':
+        this.scrape(expose.scrape, then);
+        break;
+    }
+  }
+        // packages.forEach(
+        //   function (pkg) {
+        //     var expose = pkg.expose;
+        //     if ( ! expose ) {
+        //       then(new Error('No method found to expose versions'));
+        //     }
+        //     echo({'expose method': expose});
+        //     var method = Object.keys(pkg.expose)[0];
+        //     switch ( method ) {
+        //       case 'scrape':
+        //         scrape({
+        //             from: expose.scrape.from,
+        //             search: expose.scrape.search,
+        //             extract: expose.scrape.extract,
+        //             group: expose.scrape.group
+        //           },
+        //           function (err, versions) {
+        //             if ( err ) then(err);
+        //             else {
+        //               var v = [], vo;
+        //               versions.forEach(
+        //                 function (version) {
+        //                   shasum(module, version,
+        //                     function (err, shasum) {
+        //                       if ( err ) then(err);
+        //                       else {
+        //                         vo = {};
+        //                         vo[version] = shasum;
+        //                         v.push(vo);
+        //                       }
+        //                     }
+        //                   );
+        //                 }
+        //               );
+        //               then(null, v);
+        //             }
+        //           }
+        //         );
+        //         // require('request')(from,
+        //         //   function (err, res, body) {
+        //         //     // console.log(res);
+        //         //     if ( err ) {
+        //         //       then(err);
+        //         //     } else {
+        //         //       var matches = body.match(regex),
+        //         //         versions = [];
+        //         //       matches.forEach(
+        //         //         function (match) {
+        //         //           versions.push(match.replace(regex, '$' + extract));
+        //         //         }
+        //         //       );
+        //         //       then(null, versions);
+        //         //     }
+        //         //   }
+        //         // );
+        //         break;
+        //       case 'json':
+        //           var from = pkg.expose.json.from,
+        //             isVersion = pkg.expose.json.version,
+        //             filters = pkg.expose.json.filter,
+        //             versions = [];
+        //           require('request')(from,
+        //             function (err, res, body) {
+        //               if ( err ) {
+        //                 then(err);
+        //               } else {
+        //                 var rows = JSON.parse(body);
+        //                 rows.forEach(
+        //                   function (row) {
+        //                     var passedFilters = true;
+        //                     filters.forEach(
+        //                       function (filter) {
+        //                         if ( ! new RegExp(filter).test(row[isVersion]) ) {
+        //                           passedFilters = false;
+        //                         }
+        //                       }
+        //                     );
+        //                     if ( passedFilters ) {
+        //                       versions.push(row[isVersion]);
+        //                     }
+        //                   }
+        //                 );
+        //                 then(null, versions);
+        //               }
+        //             }
+        //           );
+        //         break;
+        //     }
+        //   }
+        // );
+    //   }.bind(this)
+    // );
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
 var ASYNC = require('async'),
   FS = require('fs'),
   PATH = require('path'),
@@ -429,43 +833,68 @@ var getLatest = function (filter, then) {
   );
 };
 
-var getVersions = function (filter, then) {
-  echo({'exposing versions of': filter});
-  lab(filter,
+var getVersions = function (module, then) {
+  echo({'exposing versions of': module});
+  lab(module,
     function (err, packages) {
       if ( err ) {
         throw err;
       }
-      $db.close();
       packages.forEach(
         function (pkg) {
           var expose = pkg.expose;
           if ( ! expose ) {
-            throw new Error('No method found to expose versions');
+            then(new Error('No method found to expose versions'));
           }
+          echo({'expose method': expose});
           var method = Object.keys(pkg.expose)[0];
           switch ( method ) {
             case 'scrape':
-              var from = pkg.expose.scrape.from,
-                regex = new RegExp(pkg.expose.scrape.search, 'g'),
-                extract = pkg.expose.scrape.extract;
-              require('request')(from,
-                function (err, res, body) {
-                  // console.log(res);
-                  if ( err ) {
-                    then(err);
-                  } else {
-                    var matches = body.match(regex),
-                      versions = [];
-                    matches.forEach(
-                      function (match) {
-                        versions.push(match.replace(regex, '$' + extract));
+              scrape({
+                  from: expose.scrape.from,
+                  search: expose.scrape.search,
+                  extract: expose.scrape.extract,
+                  group: expose.scrape.group
+                },
+                function (err, versions) {
+                  if ( err ) then(err);
+                  else {
+                    var v = [], vo;
+                    versions.forEach(
+                      function (version) {
+                        shasum(module, version,
+                          function (err, shasum) {
+                            if ( err ) then(err);
+                            else {
+                              vo = {};
+                              vo[version] = shasum;
+                              v.push(vo);
+                            }
+                          }
+                        );
                       }
                     );
-                    then(null, versions);
+                    then(null, v);
                   }
                 }
               );
+              // require('request')(from,
+              //   function (err, res, body) {
+              //     // console.log(res);
+              //     if ( err ) {
+              //       then(err);
+              //     } else {
+              //       var matches = body.match(regex),
+              //         versions = [];
+              //       matches.forEach(
+              //         function (match) {
+              //           versions.push(match.replace(regex, '$' + extract));
+              //         }
+              //       );
+              //       then(null, versions);
+              //     }
+              //   }
+              // );
               break;
             case 'json':
                 var from = pkg.expose.json.from,
@@ -621,8 +1050,13 @@ var shasum = function (module, version, then) {
 var scrape = function (scraper, then) {
   echo({scraping: scraper});
   var from = scraper.from,
-    regex = new RegExp(scraper.search),
+    flags = '',
+    group = scraper.group && scraper.group,
     extract = scraper.extract;
+  if ( group ) {
+    flags += 'g';
+  }
+  var regex = new RegExp(scraper.search, flags);
   REQUEST(from,
     function (err, headers, data) {
       if ( err ) then(err);
@@ -631,7 +1065,18 @@ var scrape = function (scraper, then) {
         if ( ! matches || ! matches[extract] ) {
           then(new Error('Scrape failed'));
         } else {
-          then(null, matches[extract]);
+          if ( group ) {
+            var g = [], gv;
+            matches.forEach(
+              function (match) {
+                g.push(match.replace(new RegExp(scraper.search), '$' + extract));
+              }
+            );
+            then(null, g);
+          }
+          else {
+            then(null, matches[extract]);
+          }
         }
       }
     }
@@ -640,12 +1085,13 @@ var scrape = function (scraper, then) {
 
 var action = process.argv[2],
   module = process.argv[3],
-  version = process.argv[4];
+  version = process.argv[4],
+  Apt = new apt();
 
 switch ( action ) {
   case 'help':
-  case '--help':
-  case '-h':
+    case '--help':
+    case '-h':
     db(
       function (err, db) {
         db.collection('readme',
@@ -665,12 +1111,13 @@ switch ( action ) {
     );
     break;
   case 'latest':
-    getLatest(module,
+    Apt.latest(module,
       function (err, latest) {
         if ( err ) {
-          throw err;
+          Apt.error(err, true);
         }
         console.log(latest);
+        Apt.conn.close();
       }
     );
     break;
@@ -685,7 +1132,7 @@ switch ( action ) {
     );
     break;
   case 'versions':
-    getVersions(pkg,
+    getVersions(module,
       function (err, versions) {
         if ( err ) {
           throw err;
@@ -710,27 +1157,27 @@ switch ( action ) {
     );
     break;
   case 'lab':
-    lab(pkg,
+    Apt.lab(module,
       function (err, lab) {
         if ( err ) {
           throw err;
         }
         console.log(JSON.stringify(lab, null, 2));
-        $db.close();
+        Apt.conn.close();
       }
     );
     break;
   case 'station':
-  case '':
-  case null:
-  case undefined:
-    get({},
+    case '':
+    case null:
+    case undefined:
+    Apt.station({},
       function (err, packages) {
         if ( err ) {
           throw err;
         }
         console.log(packages);
-        $db.close();
+        Apt.conn.close();
       }
     );
     break;
