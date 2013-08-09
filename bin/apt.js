@@ -19,7 +19,7 @@ var apt = function () {
 
 apt.prototype.require = function(module) {
   if ( ! this.node_modules[module] ) {
-    this.echo({require: module});
+    this.echo({'importing new node module at runtime': module});
     this.node_modules[module] = require(module);
   }
   return this.node_modules[module];
@@ -75,10 +75,10 @@ apt.prototype.station = function(modules, then) {
   );
 };
 
-apt.prototype.lab = function(modules, then) {
-  this.echo({lab: (modules ? modules : {})});
-  if ( typeof modules == 'string' ) {
-    modules = { name: modules };
+apt.prototype.lab = function(search, then) {
+  this.echo({lab: {'searching for': search}});
+  if ( typeof search == 'string' ) {
+    search = { name: search };
   }
   this.db(
     function (err, db) {
@@ -88,11 +88,13 @@ apt.prototype.lab = function(modules, then) {
           function (err, lab) {
             if ( err ) then(err);
             else {
-              lab.find(modules)
+              lab.find(search)
                 .toArray(
                   function (err, modules) {
                     if ( err ) then(err);
                     else {
+                      this.echo({lab: {found: modules.length + ' module(s)',
+                        matching: search }});
                       var lab = [];
                       modules.forEach(
                         function (module) {
@@ -101,13 +103,13 @@ apt.prototype.lab = function(modules, then) {
                       );
                       then(null, lab);
                     }
-                  }
+                  }.bind(this)
                 );
             }
-          }
+          }.bind(this)
         );
       }
-    }
+    }.bind(this)
   );
 };
 
@@ -154,7 +156,7 @@ apt.prototype.latest = function(module, then) {
 };
 
 apt.prototype.scrape = function(scraper, then) {
-  this.echo({scrape: scraper});
+  this.echo({'scraping': scraper.from});
   var from = scraper.from,
     flags = '',
     group = scraper.group && scraper.group,
@@ -277,21 +279,20 @@ apt.prototype.version = function(module, version, then) {
 };
 
 apt.prototype.versions = function(module, then) {
-  this.echo({versions: (module instanceof ModelLabModule) ? module.name : module});
+  this.echo({'getting versions of': (module instanceof ModelLabModule) ? module.name : module});
   if ( ! (module instanceof ModelLabModule) ) {
     this.lab(module,
       function (err, packages) {
         if ( err ) {
           then(err);
         } else {
-          this.versions(packages[0], version, then);
+          this.versions(packages[0], then);
         }
       }.bind(this)
     );
   } else {
     var expose = module.expose,
       method = Object.keys(expose)[0];
-    this.echo({versions: { method: expose}});
     switch ( method ) {
       case 'scrape':
         this.scrape(expose.scrape, then);
@@ -1132,12 +1133,13 @@ switch ( action ) {
     );
     break;
   case 'versions':
-    getVersions(module,
+    Apt.versions(module,
       function (err, versions) {
         if ( err ) {
           throw err;
         }
         console.log(versions);
+        Apt.conn.close();
       }
     );
     break;
