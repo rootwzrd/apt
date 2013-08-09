@@ -1,6 +1,7 @@
 require('colors');
 
 var ModelLabModule = function ($object) {
+  // this.$__model = true;
   for ( var key in $object ) {
     this[key] = $object[key];
   }
@@ -157,6 +158,9 @@ apt.prototype.latest = function(module, then) {
 
 apt.prototype.scrape = function(scraper, then) {
   this.echo({'scraping': scraper.from});
+  if ( typeof then !== 'function' ) {
+    throw new Error('then must be a function');
+  }
   var from = scraper.from,
     flags = '',
     group = scraper.group && scraper.group,
@@ -167,7 +171,10 @@ apt.prototype.scrape = function(scraper, then) {
   var regex = new RegExp(scraper.search, flags);
   this.require('request')(from,
     function (err, headers, data) {
-      if ( err ) then(err);
+      if ( err ) {
+        console.log(err);
+        then(err);
+      }
       else {
         var matches = data.match(regex);
         if ( ! matches || ! matches[extract] ) {
@@ -195,12 +202,12 @@ apt.prototype.shasum = function(module, version, then) {
   this.echo({shasum: (module instanceof ModelLabModule) ? module.name : module});
   if ( ! (module instanceof ModelLabModule) ) {
     this.lab({name: module},
-      function (err, module) {
+      function (err, modules) {
         if ( err ) then(err);
         else {
-          this.shasum(module, version, then);
+          this.shasum(modules[0], version, then);
         }
-      }
+      }.bind(this)
     );
   } else if ( ! (version instanceof ModelRelease) ) {
     this.version(module, version,
@@ -221,59 +228,79 @@ apt.prototype.shasum = function(module, version, then) {
 
 apt.prototype.version = function(module, version, then) {
   this.echo({version: (module instanceof ModelLabModule) ? module.name : module});
-  if ( ! version || version == 'latest' ) {
-    this.latest(module, then);
+  if ( ! (module instanceof ModelLabModule) ) {
+    this.lab(module,
+      function (err, modules) {
+        if ( err ) then(err);
+        else {
+          this.version(modules[0], version, then);
+        }
+      }.bind(this)
+    );
   } else {
-    if ( version.match(/^\d+\.\d+\.\d+$/) ) {
-      this.versions(module,
-        function (err, versions) {
-          if ( err ) {
-            then(err);
-          } else {
-            console.log(versions);
-            if ( versions.indexOf(version) >= 0 ) {
-              then(null, new ModelRelease(version));
+    if ( ! version || version == 'latest' ) {
+      this.latest(module, then);
+    } else {
+      if ( version.match(/^\d+\.\d+\.\d+$/) ) {
+        this.versions(module,
+          function (err, versions) {
+            if ( err ) {
+              then(err);
             } else {
-              then(null, null);
+              if ( versions.indexOf(version) >= 0 ) {
+                then(null, new ModelRelease(version));
+              } else {
+                then(null, null);
+              }
             }
           }
-        }
-      );
-    } else if ( version.match(/^\d+|x\.\d+|x\.\d+|x$/) ) {
-      this.versions(module,
-        function (err, versions) {
-          if ( err ) {
-            then(err);
-          } else {
-            var chunks = version.split('.'),
-              major = chunks[0] == 'x' ? null : +chunks[0],
-              minor = chunks[1] == 'x' ? null : +chunks[1],
-              patch = chunks[2] == 'x' ? null : +chunks[2],
-              candidates = [];
-            versions.forEach(
-              function (version) {
-                var chunks2 = version.split('.'),
-                  match = true;
-                if ( major ) {
-                  if ( +chunks2[0] != major ) {
-                    match = false;
+        );
+      } else if ( version.match(/^\d+|x\.\d+|x\.\d+|x$/) ) {
+        this.versions(module,
+          function (err, versions) {
+            if ( err ) {
+              then(err);
+            } else {
+              var chunks = version.split('.'),
+                major = chunks[0] == 'x' ? null : +chunks[0],
+                minor = chunks[1] == 'x' ? null : +chunks[1],
+                patch = chunks[2] == 'x' ? null : +chunks[2],
+                candidates = [];
+              versions.forEach(
+                function ($version) {
+                  var chunks2 = $version.split('.'),
+                    match = true;
+                  if ( major ) {
+                    if ( +chunks2[0] != major ) {
+                      match = false;
+                    }
+                  }
+                  if ( minor ) {
+                    if ( +chunks2[1] != minor ) {
+                      match = false;
+                    }
+                  }
+                  if ( match ) {
+                    candidates.push($version);
+                  }
+                }.bind(this)
+              );
+              var candidate = this.sortVersions(candidates).reverse()[0];
+              this.echo({'semantic version': version, 'resolved to': candidate});
+              this.shasum(module, new ModelRelease(candidate),
+                function (err, shasum) {
+                  if ( err ) then(err);
+                  else {
+                    var  obj = {};
+                    obj[candidate] = shasum;
+                    then(null, obj);
                   }
                 }
-                if ( minor ) {
-                  if ( +chunks2[1] != minor ) {
-                    match = false;
-                  }
-                }
-                if ( match ) {
-                  candidates.push(version);
-                }
-              }.bind(this)
-            );
-            then(null,
-              this.sortVersions(candidates).reverse()[0]);
-          }
-        }.bind(this)
-      );
+              );
+            }
+          }.bind(this)
+        );
+      }
     }
   }
 };
@@ -391,6 +418,38 @@ apt.prototype.versions = function(module, then) {
         // );
     //   }.bind(this)
     // );
+};
+
+apt.prototype.sortVersions = function(versions) {
+  var vobj = {},
+    sort = [];
+  versions.forEach(
+    function (version) {
+      var chunks = version.split('.');
+      if ( ! vobj[chunks[0]] ) {
+        vobj[chunks[0]] = {};
+      }
+      if ( ! vobj[chunks[0]][chunks[1]] ) {
+        vobj[chunks[0]][chunks[1]] = [];
+      }
+      if ( vobj[chunks[0]][chunks[1]].indexOf(+chunks[2]) == -1 ) {
+        vobj[chunks[0]][chunks[1]].push(+chunks[2]);
+      }
+      vobj[chunks[0]][chunks[1]] = vobj[chunks[0]][chunks[1]].sort(function(a,b) {
+        return (a-b);
+      });
+    }
+  );
+  for ( var major in vobj ) {
+    for ( var minor in vobj[major] ) {
+      vobj[major][minor].forEach(
+        function (patch) {
+          sort.push([major, minor, patch].join('.'));
+        }
+      );
+    }
+  }
+  return sort;
 };
 
 
@@ -1144,17 +1203,13 @@ switch ( action ) {
     );
     break;
   case 'version':
-    var pkg = process.argv[3],
-      version = process.argv[4];
-    if ( ! pkg ) {
-      throw new Error('Missing pkg to evaluate version from');
-    }
-    getVersion(pkg, version,
-      function (err, version) {
-        if ( err ) {
-          throw err;
+    Apt.version(module, version,
+      function (err, release) {
+        if ( err ) then(err);
+        else {
+          console.log(release);
+          Apt.conn.close();
         }
-        console.log(version);
       }
     );
     break;
