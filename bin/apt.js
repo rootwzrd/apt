@@ -1,16 +1,31 @@
 require('colors');
 
+/** MODEL : LAB MODULE
+/*  === === ===
+/*  { name: String } 
+**/
 var ModelLabModule = function ($object) {
-  // this.$__model = true;
+  if ( typeof $object !== 'object' ) {
+    throw new Error('ModelLabModule: $Object must be an object');
+  }
+  Apt.echo({'new': 'ModelLabModule', 'object': $object.name});
   for ( var key in $object ) {
     this[key] = $object[key];
   }
 };
 
-var ModelRelease = function ($string) {
-  this.toString = function () {
-    return $string;
-  };
+/** MODEL : RELEASE
+/*  === === ===
+/*  { release: String } 
+**/
+var ModelRelease = function ($object) {
+  if ( typeof $object === 'string' ) {
+    $object = { release: $object };
+  }
+  Apt.echo({'new': 'ModelRelease', 'object': $object});
+  for ( var key in $object ) {
+    this[key] = $object[key];
+  }
 };
 
 var apt = function () {
@@ -18,6 +33,10 @@ var apt = function () {
   this.node_modules = {};
 };
 
+/** APT : REQUIRE
+/*  === === ===
+/*  CommonJS module 
+**/
 apt.prototype.require = function(module) {
   if ( ! this.node_modules[module] ) {
     this.echo({'importing new node module at runtime': module});
@@ -115,7 +134,8 @@ apt.prototype.lab = function(search, then) {
 };
 
 apt.prototype.latest = function(module, then) {
-  this.echo({latest: (module instanceof ModelLabModule) ? module.name : module});
+  var _module = (module instanceof ModelLabModule) ? module.name : module;
+  this.echo({latest: { module: _module}});
   if ( ! (module instanceof ModelLabModule) ) {
     this.lab(module,
       function (err, modules) {
@@ -139,16 +159,7 @@ apt.prototype.latest = function(module, then) {
             if ( err ) then(err);
             else {
               this.echo({latest: { module: module.name, latest: latest}});
-              this.shasum(module, new ModelRelease(latest),
-                function (err, shasum) {
-                  if ( err ) then(err);
-                  else {
-                    var response = {};
-                    response[latest] = shasum;
-                    then(null, response);
-                  }
-                }
-              );
+              then(null, new ModelRelease(latest));
             }
           }.bind(this)
       );
@@ -198,36 +209,36 @@ apt.prototype.scrape = function(scraper, then) {
   );
 };
 
-apt.prototype.shasum = function(module, version, then) {
-  this.echo({shasum: (module instanceof ModelLabModule) ? module.name : module});
-  if ( ! (module instanceof ModelLabModule) ) {
-    this.lab({name: module},
-      function (err, modules) {
-        if ( err ) then(err);
-        else {
-          this.shasum(modules[0], version, then);
-        }
-      }.bind(this)
-    );
-  } else if ( ! (version instanceof ModelRelease) ) {
-    this.version(module, version,
-      function (err, version) {
-        if ( err ) then(err);
-        else {
-          this.shasum(module, version, then);
-        }
-      }.bind(this)
-    );
-  } else {
-    var shasum = module.shasum;
-    shasum.from = shasum.scrape.replace(/\{\{version\}\}/g, version.toString());
-    shasum.search = shasum.search.replace(/\{\{version\}\}/g, version.toString().replace(/\./g, '\\.'));
-    scrape(shasum, then);
+apt.prototype.shasum = function(profile, version, then) {
+  this.echo({shasum: profile});
+  var method = Object.keys(profile)[0],
+    from = profile[method].from.replace(/\{\{version\}\}/g, version);
+  switch ( method ) {
+    case 'scrape':
+      this.scrape(
+        {
+          from: from,
+          search: profile[method].search.replace(/\{\{version\}\}/g, version.replace(/\./g, '\\.')),
+          extract: profile[method].extract,
+          group: profile[method].group
+        },
+        function (err, shasum) {
+          if ( err ) then(err);
+          else {
+            this.echo({shasum: {version: version, shasum: shasum}});
+            then(null, shasum);
+          }
+        }.bind(this)
+      );
+      break;
   }
 };
 
 apt.prototype.version = function(module, version, then) {
-  this.echo({version: (module instanceof ModelLabModule) ? module.name : module});
+  var _module = (module instanceof ModelLabModule) ? module.name : module,
+    _version = (version instanceof ModelRelease) ? Object.keys(version)[0] : (
+      version ? version : 'undefined');
+  this.echo({version: { module: _module, version: _version}});
   if ( ! (module instanceof ModelLabModule) ) {
     this.lab(module,
       function (err, modules) {
@@ -239,6 +250,7 @@ apt.prototype.version = function(module, version, then) {
     );
   } else {
     if ( ! version || version == 'latest' ) {
+      this.echo({version: { module: _module, version: _version, message: 'Using latest'}});
       this.latest(module, then);
     } else {
       if ( version.match(/^\d+\.\d+\.\d+$/) ) {
@@ -248,12 +260,21 @@ apt.prototype.version = function(module, version, then) {
               then(err);
             } else {
               if ( versions.indexOf(version) >= 0 ) {
-                then(null, new ModelRelease(version));
+                this.shasum(module, version,
+                  function (err, shasum) {
+                    if ( err ) then(err);
+                    else {
+                      var _ = {};
+                      _[shasum] = version;
+                      then(null, _);
+                    }
+                  }
+                );
               } else {
                 then(null, null);
               }
             }
-          }
+          }.bind(this)
         );
       } else if ( version.match(/^\d+|x\.\d+|x\.\d+|x$/) ) {
         this.versions(module,
@@ -287,16 +308,7 @@ apt.prototype.version = function(module, version, then) {
               );
               var candidate = this.sortVersions(candidates).reverse()[0];
               this.echo({'semantic version': version, 'resolved to': candidate});
-              this.shasum(module, new ModelRelease(candidate),
-                function (err, shasum) {
-                  if ( err ) then(err);
-                  else {
-                    var  obj = {};
-                    obj[candidate] = shasum;
-                    then(null, obj);
-                  }
-                }
-              );
+              then(null, new ModelRelease(candidate));
             }
           }.bind(this)
         );
@@ -452,701 +464,258 @@ apt.prototype.sortVersions = function(versions) {
   return sort;
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
-var ASYNC = require('async'),
-  FS = require('fs'),
-  PATH = require('path'),
-  REQUEST = require('request'),
-  CP = require('child_process');
-
-var echo = function (message) {
-  console.warn(JSON.stringify(message, null, 0).grey.bold);
-};
-
-var wget = function(from, info, then) {
-  var args = ['--debug'];
-  if ( typeof info == 'object' ) {
-    for ( var key in info ) {
-      switch ( key ) {
-        case 'O':
-        case 'output':
-        case 'target':
-          args.push('-O');
-          args.push(info[key]);
-          break;
-        case 'c':
-        case 'continue':
-        case 'resume':
-          args.push('--continue');
-          break;
-      }
-    }
-  }
-  args.push(from);
-  var wget = CP.spawn('wget', args);
-  wget.on('error',
-    function (err) {
-      console.log({'wget error': err});
-    }
-  );
-  wget.on('close',
-    function (code) {
-      if ( code !== 0 ) {
-        then(new Error('wget failed with error code ' + code));
-      }
-    }
-  );
-  wget.on('exit',
-    function (signal) {
-      console.log({'wget exit signal': signal});
-    }
-  );
-  wget.stderr.setEncoding('utf-8');
-  wget.stderr.on('data',
-    function (data) {
-      console.log({'wget stderr': data});
-    }
-  );
-};
-
-var path = PATH.dirname(__dirname);
-
-var downloadFromGitHub = function (info, then) {
-  if ( typeof info != 'object' ) {
-    then(new Error('Downloading from github failed: info must be an object'));
-  } else {
-    var vendor = info.vendor,
-      repo = info.repo,
-      release = info.release,
-      prefix = ((info.prefix) ? info.prefix : '');
-    if ( ! vendor ) {
-      then(new Error('Downloading from github failed: missing vendor'));
-    } else if ( ! repo ) {
-      then(new Error('Downloading from github failed: missing repo'));
-    } else if ( ! release ) {
-      then(new Error('Downloading from github failed: missing release'));
-    } else {
-      var dlpath = path + '/sources/' + repo;
-      FS.exists(dlpath,
-        function (exists) {
-          if ( ! exists ) {
-            FS.mkdir(dlpath,
-              function (err) {
-                if ( err ) {
-                  then(err);
-                } else {
-                  downloadFromGitHub(info, then);
-                }
-              }
-            );
-          } else {
-            var saveAs = repo + '-' + release + '.tar.gz',
-              git = CP.spawn('git',[
-                  'clone',
-                  'https://github.com/' + vendor + '/' + repo + '.git',
-                  release ], {
-                  cwd: dlpath
-                }
-              );
-            git.on('error',
-              function (code) {
-                console.log({'got code from downloading from github': code});
-              }
-            );
-            git.stderr.on('data',
-              function (data) {
-                console.log({'Downloading from github (stderr)': data.toString()});
-              }
-            );
-            git.stdout.on('data',
-              function (data) {
-                console.log({'Downloading from github (stdout)': data.toString()});
-              }
-            );
-
-            // new Download(
-            //   'https://github.com/' + vendor + '/' + repo + '/archive/' +
-            //     prefix + release + '.tar.gz',
-            //   dlpath + '/' + saveAs,
-            //   function (err, res) {
-            //     if ( err ) {
-            //       then(err);
-            //     } else {
-            //       console.log({'Got result from wget': res});
-            //     }
-            //   }
-            // );
-            // FS.exists(dlpath + '/' + saveAs,
-            //   function (exists) {
-            //     if ( exists ) {
-            //       console.log('Already downloaded!');
-            //     } else {
-
-            //     }
-            //   }
-            // );
-          }
-        }
-      );
-    }
-  }
-};
-
-var $db = null;
-
-var db = function (then) {
-  if ( ! $db ) {
-    require('mongodb').connect('mongodb://localhost:2007/apt',
-      function (err, db) {
-        if ( err ) {
-          then(err);
-        } else {
-          $db = db;
-          then(null, $db);
-        }
-      }
-    );
-  } else {
-    then(null, $db);
-  }
-};
-
-var get = function (filter, then) {
-  echo({'get from station': filter});
-  if ( typeof filter == 'string' ) {
-    filter = { name: filter };
-  }
-  db(
-    function (err, db) {
-      if ( err ) {
-        then(err);
-      } else {
-        db.collection('packages',
-          function (err, packages) {
-            if ( err ) {
-              then(err);
-            } else {
-              packages.find(filter).toArray(
-                function (err, results) {
-                  if ( err ) {
-                    then(err);
-                  } else {
-                    then(null, results);
-                  }
-                }
-              );
-            }
-          }
-        );
-      }
-    }
-  );
-};
-
-var lab = function (filter, then) {
-  echo({'searching lab for': filter});
-
-  if ( typeof filter == 'string' ) {
-    filter = { name: filter };
-  }
-  db(
-    function (err, db) {
-      if ( err ) {
-        then(err);
-      } else {
-        db.collection('lab',
-          function (err, lab) {
-            if ( err ) {
-              then(err);
-            } else {
-              lab.find(filter).toArray(
-                function (err, results) {
-                  if ( err ) {
-                    then(err);
-                  } else {
-                    echo({'Lab returned': { results: results.length, "for": filter }});
-                    then(null, results);
-                  }
-                }
-              );
-            }
-          }
-        );
-      }
-    }
-  );
-};
-
-var install = function (pkg, version, then, step) {
-  step = isNaN(step) ? 1 : step;
-
-  console.log({installing: { pkg: pkg, version: version, step: step }});
-
-  var release = version,
-    path = PATH.dirname(__dirname);
-  
-  if ( typeof release != 'string' ||
-      ! release.match(/^\d+\.\d+\.\d+$/) ) {
-    return getVersion(pkg, version,
-      function (err, release) {
+apt.prototype.install = function(module, version, then) {
+  var echo = { installing: {} };
+  /** Retrieve module profile from lab **/
+  if ( ! (module instanceof ModelLabModule) ) {
+    this.echo({installing: { 'looking in lab for': module}});
+    this.lab({name: module},
+      function (err, modules) {
         if ( err ) then(err);
         else {
-          install(pkg, release, then);
+          if ( ! modules.length ) {
+            then(new Error('No modules found'));
+          } else {
+            this.install(modules[0], version, then);
+          }
         }
-      }
+      }.bind(this)
     );
   }
-
-  switch ( step ) {
-    /* 1) get package profile from lab */
-    case 1:
-      lab(pkg,
-        function (err, packages) {
-          if ( err ) then(err);
-          else {
-            if ( ! packages.length ) {
-              then(new Error('No package found for ' + pkg));
-            } else {
-              install(packages[0], release, then, 2);
-            }
-          }
+  /** Retrieve version information **/
+  else if ( ! (version instanceof ModelRelease) ) {
+    this.echo({installing: ('Looking for version matching ' + version)});
+    this.version(module, version,
+      function (err, version) {
+        if ( err ) then(err);
+        else {
+          this.install(module, version, then);
         }
-      );
-      break;
-    /* 2) create directory structure if needed */
-    case 2:
-      var dirpath = path + '/sources/' + pkg.name;
-      FS.exists(dirpath,
-        function (exists) {
-          if ( ! exists ) {
-            console.log({installing: { 'creating directory': dirpath }});
-            FS.mkdir(dirpath,
-              function (err) {
-                if ( err ) then(err);
-                else {
-                  install(pkg, release, then, step);
-                }
-              }
-            );
-          } else {
-            var releaseDir = dirpath + '/' + release;
-            FS.exists(releaseDir,
-              function (exists) {
-                if ( ! exists ) {
-                  install(pkg, release, then, 3);
-                } else {
-                  var modulePath = path + '/modules/' + pkg.name;
-                  FS.exists(modulePath,
-                    function (exists) {
-                      if ( ! exists) {
-                        FS.mkdir(modulePath,
-                          function (err) {
-                            if ( err ) then(err);
-                            else {
-                              install(pkg, release, then, step);
-                            }
-                          }
-                        );
-                      } else {
-                        var releasePath = modulePath + '/' + version;
-                        FS.exists(releasePath,
-                          function (exists) {
-                            if ( ! exists ) {
-                              FS.mkdir(releasePath,
-                                function (err) {
-                                  if ( err ) then(err);
-                                  else {
-                                    install(pkg, release, then, step);
-                                  }
-                                }
-                              );
-                            } else {
-                              var ls = CP.spawn('ls', [releasePath]),
-                                files = [];
-                              ls.on('error',
-                                function (err) {
-                                  then(err);
-                                }
-                              );
-                              ls.stdout.setEncoding('utf-8');
-                              ls.stdout.on('data',
-                                function (data) {
-                                  files.push(data.trim());
-                                }
-                              );
-                              ls.on('close',
-                                function (code) {
-                                  if ( files.length ) {
-                                    then(new Error('Already installed'));
-                                  }
-                                }
-                              );
-                            }
-                          }
-                        );
-                      }
-                    }
-                  );
-                }
-              }
-            );
-          }
-        }
-      );
-      break;
-    /* 3) download module sources if needed */
-    case 3:
-      console.log({installing: 'downloading'});
-      for ( var downloadMethod in pkg.install.download );
-      switch ( downloadMethod ) {
-        case 'github':
-          var github = pkg.install.download.github;
-          github.release =  version;
-          downloadFromGitHub(github,
-            function (err, response) {
+      }.bind(this)
+    );
+  } else {
+    echo.installing[module.name] = { version: version.release };
+    this.echo(echo);
+    var installPath = this.require('path').dirname(__dirname) +
+      '/modules/' + module.name;
+    /** Check if module already has a folder **/
+    this.require('fs').exists(installPath,
+      function (exists) {
+        if ( ! exists ) {
+          /** Create module folder if do not exists  **/
+          this.require('fs').mkdir(installPath,
+            function (err) {
               if ( err ) then(err);
               else {
-                console.log({'got response from git': response});
+                this.install(module, version, then);
               }
-            }
+            }.bind(this)
           );
-          break;
-      }
-      break;
-    /* 4) compile module source */
-    /* 5) update station database */
-  }
-};
-
-var getLatest = function (filter, then) {
-  echo({'getting latest version of': filter});
-  lab(filter,
-    function (err, packages) {
-      if ( err ) {
-        throw err;
-      }
-      packages.forEach(
-        function (pkg) {
-          var latest = pkg.latest;
-          if ( ! latest ) {
-            throw new Error('No method found to get latest version');
-          }
-          var method = Object.keys(pkg.latest)[0];
-          switch ( method ) {
-            case 'scrape':
-              scrape({
-                  from: pkg.latest.scrape.from,
-                  search: pkg.latest.scrape.search,
-                  extract: pkg.latest.scrape.extract
-                },
-                function (err, latest) {
-                  if ( err ) then(err);
-                  else {
-                    shasum(filter, latest,
-                      function (err, shasum) {
-                        if ( err ) then(err);
-                        else {
-                          var response = {};
-                          response[latest] = shasum;
-                          then(null, response);
-                        }
-                      }
-                    );
-                  }
-                }
-              );
-              // require('http').get(from,
-              //   function (res) {
-              //     var response = '';
-              //     res.on('data',
-              //       function (data) {
-              //         response += data.toString();
-              //       }
-              //     );
-              //     res.on('end', function () {
-              //       var matches = response.match(regex);
-              //       if ( ! matches[extract] ) {
-              //         throw new Error('Could not fetch latest version');
-              //       }
-                      
-              //     });
-              //   }
-              // ).on('error', function (err) {
-              //   throw err;
-              // });
-              break;
-          }
-        }
-      );
-    }
-  );
-};
-
-var getVersions = function (module, then) {
-  echo({'exposing versions of': module});
-  lab(module,
-    function (err, packages) {
-      if ( err ) {
-        throw err;
-      }
-      packages.forEach(
-        function (pkg) {
-          var expose = pkg.expose;
-          if ( ! expose ) {
-            then(new Error('No method found to expose versions'));
-          }
-          echo({'expose method': expose});
-          var method = Object.keys(pkg.expose)[0];
-          switch ( method ) {
-            case 'scrape':
-              scrape({
-                  from: expose.scrape.from,
-                  search: expose.scrape.search,
-                  extract: expose.scrape.extract,
-                  group: expose.scrape.group
-                },
-                function (err, versions) {
-                  if ( err ) then(err);
-                  else {
-                    var v = [], vo;
-                    versions.forEach(
-                      function (version) {
-                        shasum(module, version,
-                          function (err, shasum) {
-                            if ( err ) then(err);
-                            else {
-                              vo = {};
-                              vo[version] = shasum;
-                              v.push(vo);
-                            }
-                          }
-                        );
-                      }
-                    );
-                    then(null, v);
-                  }
-                }
-              );
-              // require('request')(from,
-              //   function (err, res, body) {
-              //     // console.log(res);
-              //     if ( err ) {
-              //       then(err);
-              //     } else {
-              //       var matches = body.match(regex),
-              //         versions = [];
-              //       matches.forEach(
-              //         function (match) {
-              //           versions.push(match.replace(regex, '$' + extract));
-              //         }
-              //       );
-              //       then(null, versions);
-              //     }
-              //   }
-              // );
-              break;
-            case 'json':
-                var from = pkg.expose.json.from,
-                  isVersion = pkg.expose.json.version,
-                  filters = pkg.expose.json.filter,
-                  versions = [];
-                require('request')(from,
-                  function (err, res, body) {
-                    if ( err ) {
-                      then(err);
-                    } else {
-                      var rows = JSON.parse(body);
-                      rows.forEach(
-                        function (row) {
-                          var passedFilters = true;
-                          filters.forEach(
-                            function (filter) {
-                              if ( ! new RegExp(filter).test(row[isVersion]) ) {
-                                passedFilters = false;
-                              }
-                            }
-                          );
-                          if ( passedFilters ) {
-                            versions.push(row[isVersion]);
-                          }
-                        }
-                      );
-                      then(null, versions);
-                    }
-                  }
-                );
-              break;
-          }
-        }
-      );
-    }
-  );
-};
-
-var getVersion = function (pkg, version, then) {
-  echo({'resolving version of': {pkg:pkg, version:version}});
-
-  if ( ! version || version == 'latest' ) {
-    getLatest({name: pkg}, then);
-  } else {
-    if ( version.match(/^\d+\.\d+\.\d+$/) ) {
-      getVersions({name: pkg},
-        function (err, versions) {
-          if ( err ) {
-            then(err);
-          } else {
-            if ( versions.indexOf(version) >= 0 ) {
-              then(null, version);
-            } else {
-              then(null, null);
-            }
-          }
-        }
-      );
-    } else if ( version.match(/^\d+|x\.\d+|x\.\d+|x$/) ) {
-      getVersions({name: pkg},
-        function (err, versions) {
-          if ( err ) {
-            then(err);
-          } else {
-            var chunks = version.split('.'),
-              major = chunks[0] == 'x' ? null : +chunks[0],
-              minor = chunks[1] == 'x' ? null : +chunks[1],
-              patch = chunks[2] == 'x' ? null : +chunks[2],
-              candidates = [];
-            versions.forEach(
-              function (version) {
-                var chunks2 = version.split('.'),
-                  match = true;
-                if ( major ) {
-                  if ( +chunks2[0] != major ) {
-                    match = false;
-                  }
-                }
-                if ( minor ) {
-                  if ( +chunks2[1] != minor ) {
-                    match = false;
-                  }
-                }
-                if ( match ) {
-                  candidates.push(version);
-                }
-              }
-            );
-            then(null,
-              sortVersions(candidates).reverse()[0]);
-          }
-        }
-      );
-    }
-  }
-};
-
-var sortVersions = function (versions) {
-  var vobj = {},
-    sort = [];
-  versions.forEach(
-    function (version) {
-      var chunks = version.split('.');
-      if ( ! vobj[chunks[0]] ) {
-        vobj[chunks[0]] = {};
-      }
-      if ( ! vobj[chunks[0]][chunks[1]] ) {
-        vobj[chunks[0]][chunks[1]] = [];
-      }
-      if ( vobj[chunks[0]][chunks[1]].indexOf(+chunks[2]) == -1 ) {
-        vobj[chunks[0]][chunks[1]].push(+chunks[2]);
-      }
-      vobj[chunks[0]][chunks[1]] = vobj[chunks[0]][chunks[1]].sort(function(a,b) {
-        return (a-b);
-      });
-    }
-  );
-  for ( var major in vobj ) {
-    for ( var minor in vobj[major] ) {
-      vobj[major][minor].forEach(
-        function (patch) {
-          sort.push([major, minor, patch].join('.'));
-        }
-      );
-    }
-  }
-  return sort;
-};
-
-var shasum = function (module, version, then) {
-  echo({'getting shasum for': { module: module, version: version}});
-  lab(module,
-    function (err, modules) {
-      if ( err ) then(err);
-      else {
-        var shasum = modules[0].shasum;
-        getVersion(module, version,
-          function (err, version) {
-            if ( err ) then(err);
-            else {
-              shasum.from = shasum.scrape.replace(/\{\{version\}\}/g, version);
-              shasum.search = shasum.search.replace(/\{\{version\}\}/g, version.replace(/\./g, '\\.'));
-              scrape(shasum, then);
-            }
-          }
-        );
-      }
-    }
-  );
-};
-
-var scrape = function (scraper, then) {
-  echo({scraping: scraper});
-  var from = scraper.from,
-    flags = '',
-    group = scraper.group && scraper.group,
-    extract = scraper.extract;
-  if ( group ) {
-    flags += 'g';
-  }
-  var regex = new RegExp(scraper.search, flags);
-  REQUEST(from,
-    function (err, headers, data) {
-      if ( err ) then(err);
-      else {
-        var matches = data.match(regex);
-        if ( ! matches || ! matches[extract] ) {
-          then(new Error('Scrape failed'));
         } else {
-          if ( group ) {
-            var g = [], gv;
-            matches.forEach(
-              function (match) {
-                g.push(match.replace(new RegExp(scraper.search), '$' + extract));
+          installPath += '/' + version.release;
+          /** Check if release has folder **/
+          this.require('fs').exists(installPath,
+            function (exists) {
+              /** If release has no folder **/
+              if ( ! exists ) {
+                var storageFile = this.require('path').dirname(__dirname) +
+                  '/modules/.storage/' + module.name + '-' + version.release + '.*';
+                /** Globbing search of a release tarball **/
+                this.require('glob')(storageFile,
+                  function (err, files) {
+                    if ( err ) then(err);
+                    else {
+                      /** If no tarball found, use install info from profile **/
+                      if ( ! files.length ) {
+                        var get = Object.keys(module.install.get)[0];
+                        switch ( get ) {
+                          case 'download':
+                            var url = module.install.get.download.url
+                                .replace(/\{\{version\}\}/g, version.release),
+                              getExtension = function (extension) {
+                                  var regex = new RegExp(extension.replace(/\./g,'\.') + '$');
+                                  if ( regex.test(url) ) {
+                                    if ( storageFile.match(/\.\*$/) ) {
+                                      storageFile = storageFile.replace(/\.\*$/, extension);
+                                    }
+                                  }
+                                };
+                            ['.tar.gz'].forEach(getExtension(extension));
+                            this.download(url, storageFile,
+                              function (err, response) {
+                                if ( err ) then(err);
+                                else {
+                                  console.log(response);
+                                }
+                              }
+                            );
+                            break;
+                        }
+                      }
+                      /** If tarball found **/
+                      else {
+                        storageFile = files[0];
+                        var labShasum = module.install.get[Object.keys(module.install.get)[0]].shasum;
+                        if ( labShasum ) {
+                          /** Get lab shasum **/
+                          this.shasum(labShasum, version.release,
+                            function (err, _shasum) {
+                              if ( err ) then(err);
+                              else {
+                                /** Compare lab shasum with tarball shasum **/
+                                var getStorageFileShasum = this.require('child_process')
+                                  .spawn('sha1sum', [
+                                    storageFile]);
+                                getStorageFileShasum.on('error',
+                                  function (err) {
+                                    then(err);
+                                  }
+                                );
+                                getStorageFileShasum.stdout.on('data',
+                                  function (data) {
+                                    var shasum = data.toString().trim().split(/\s/)[0];
+                                    /** If shasum does not match **/
+                                    if ( shasum != shasum ) {
+                                      then(new Error('Shasum not matching'));
+                                    }
+                                    /** If shasum matches **/
+                                    else {
+                                      /** Create the target directory **/
+                                      var targetDir = this.require('path').dirname(__dirname) +
+                                        '/modules/.storage/tmp-' + module.name + '-' + version.release;
+                                      this.require('fs').mkdir(targetDir,
+                                        function (err) {
+                                          if ( err ) then(err);
+                                          else {
+                                            var extractTarBall = this.require('child_process')
+                                              .spawn('tar', ['xzf', storageFile], { cwd: targetDir });
+                                            extractTarBall.on('error',
+                                              function (err) {
+                                                then(err);
+                                              }
+                                            );
+                                            extractTarBall.on('close',
+                                              function (code) {
+                                                if ( code ) {
+                                                  then(new Error('could not untar, got: ' + code));
+                                                } else {
+                                                  this.require('glob')(targetDir + '/*',
+                                                    function (err, files) {
+                                                      if ( err ) then(err);
+                                                      else {
+                                                        if ( ! files.length ) {
+                                                          then(new Error('No globbing found . this should not happen'));
+                                                        } else if ( files.length > 1 ) {
+                                                          then(new Error('Too many globbing found . this should not happen'));
+                                                        } else {
+                                                          var mvdir = files[0];
+                                                          this.require('wrench').copyDirRecursive(mvdir,
+                                                            this.require('path').dirname(__dirname) + '/modules/' +
+                                                              module.name + '/' + version.release,
+                                                            {
+                                                              forceDelete: false,
+                                                              excludeHiddenUnix: false,
+                                                              preserveFiles: false,
+                                                              inflateSymLinks: false
+                                                            },
+                                                            function (err) {
+                                                              if (err) {
+                                                                then(err);
+                                                              } else {
+                                                                this.require('wrench').rmdirRecursive(this.require('path')
+                                                                    .dirname(mvdir),
+                                                                  function (err) {
+                                                                    if ( err ) then(err);
+                                                                    else {
+                                                                      console.log('ok');
+                                                                    }
+                                                                  }
+                                                                );
+                                                              }
+                                                            }.bind(this)
+                                                          );
+                                                        }
+                                                      }
+                                                    }.bind(this)
+                                                  );
+                                                }
+                                              }.bind(this)
+                                            );
+                                          }
+                                        }.bind(this)
+                                      );
+                                    }
+                                  }.bind(this)
+                                );
+                              }
+                            }.bind(this)
+                          );
+                        }
+                      }
+                    }
+                  }.bind(this)
+                );
+              } else {
+                then(new Error('Module version already installed'));
               }
-            );
-            then(null, g);
-          }
-          else {
-            then(null, matches[extract]);
-          }
+            }.bind(this)
+          );
         }
-      }
-    }
-  );
+      }.bind(this)
+    );
+  }
 };
 
-var action = process.argv[2],
-  module = process.argv[3],
-  version = process.argv[4],
-  Apt = new apt();
+apt.prototype.download = function(source, to, then, method) {
+  if ( ! method ) {
+    method = 'request';
+  }
+  this.echo({downloading: source, using: method});
+  this.require('request-progress')(
+    this.require('request')(source), {
+      // throttle: 2000,
+      // delay: 1000
+    }
+  ).on('progress', function (state) {
+    var divider, unit, convert = function (num) {
+      if ( num >= 1024 ) {
+        if ( num >= (1024*1024) ) {
+          if ( num >= (1024*1024*1024) ) {
+            divider = (1024*1024*1024);
+            unit = 'GB';
+          } else {
+            divider = (1024*1024);
+            unit = 'MB';
+          }
+        } else {
+          divider = 1024;
+          unit = 'KB';
+        }
+      } else {
+        divider = 1;
+        unit = 'B';
+      }
+      return Math.floor(num / divider) + ' ' + unit;
+    }, total = convert(state.total);
+    process.stdout.write("Downloaded " + convert(state.received) + '/' +
+      total + ' - ' + state.percent + " %                    \r");
+  })
+  .on('error', function (err) {
+      throw err;
+  })
+  .pipe(this.require('fs').createWriteStream(to))
+  .on('error', function (err) {
+      // Do something with err
+  })
+  .on('close', function (err) {
+      // Saved to doogle.png!
+  });
+};
+
+var action  = process.argv[2],
+  module    = process.argv[3],
+  version   = process.argv[4],
+  Apt       = new apt();
 
 switch ( action ) {
   case 'help':
@@ -1178,16 +747,6 @@ switch ( action ) {
         }
         console.log(latest);
         Apt.conn.close();
-      }
-    );
-    break;
-  case 'shasum':
-    shasum(module, version,
-      function (err, shasum) {
-        if ( err ) then(err);
-        else {
-          console.log(shasum);
-        }
       }
     );
     break;
@@ -1239,15 +798,13 @@ switch ( action ) {
     );
     break;
   case 'install':
-    var pkg = process.argv[3],
-      version = process.argv[4];
-    if ( ! pkg ) {
-      throw new Error('Nothing to install');
-    }
-    install(pkg, version,
-      function (err, res) {
-        if ( err ) {
+    Apt.install(module, version,
+      function (err, response) {
+        if ( err ){
           throw err;
+        }
+        else {
+          console.log({bin: {responseInstall: response}});
         }
       }
     );
