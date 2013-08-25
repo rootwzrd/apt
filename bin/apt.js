@@ -1,5 +1,10 @@
 require('colors');
 
+var async = require('async'),
+  fs = require('fs'),
+  path = require('path'),
+  glob = require('glob');
+
 /** MODEL : LAB MODULE
 /*  === === ===
 /*  { name: String } 
@@ -465,10 +470,140 @@ apt.prototype.sortVersions = function(versions) {
 };
 
 apt.prototype.install = function(module, version, then) {
-  var echo = { installing: {} };
-  /** Retrieve module profile from lab **/
-  if ( ! (module instanceof ModelLabModule) ) {
-    this.echo({installing: { 'looking in lab for': module}});
+  var echo        = { installing: {} },
+    binder        = this,
+    path2modules  = path.dirname(__dirname) + '/modules',
+    path2storage  = path2modules + '/.storage',
+    path2tarball  = path2storage,
+    path2module   = path2modules,
+    path2release  = path2modules,
+    messageaction,
+    actiondone,
+    retry     = function () {
+      this.install(module, version, then);
+    }.bind(this);
+
+  /** VERIFY THAT MODULE IS A MODULE PROFILE **/
+  if ( (module instanceof ModelLabModule) ) {
+    path2module   += '/' + module.name;
+    path2tarball  += '/' + module.name + '-';
+    path2release  += '/' + module.name;
+    
+    /* MAKE SURE VERSION IS VERIFIED **/
+    if ( (version instanceof ModelRelease) ) {
+      path2tarball += version.release;
+      path2release += '/' + version.release;
+      
+      /** CHECK THAT MODULE FOLDER EXISTS **/
+      fs.exists(path2module,
+        function (exists) {
+          if ( exists ) {
+            /** VERIFY THAT MODULE RELEASE FOLDER EXISTS **/
+            fs.exists(path2release,
+              function (exists) {
+                if ( exists ) {
+                  console.log('ALREADY INSTALLED!');
+                } else {
+                  /** CHECK IF TARBALL HAS BEEN DOWNLOADED **/
+                  glob(path2tarball + '.*',
+                    function (err, files) {
+                      if ( err ) then(err);
+                      else {
+                        if ( files.length ) {
+                          path2tarball = files[0];
+
+                          /** UNCOMPRESS TARBALL **/
+                          /** BUILD **/
+                        } else {
+                          /** DOWNLOAD TARBALL **/
+                          switch ( Object.keys(module.install.get)[0] ) {
+                            case 'download':
+                              var url = module.install.get.download.url
+                                  .replace(/\{\{version\}\}/g, version.release),
+                                getExtension = function (extension) {
+                                    var regex = new RegExp(extension.replace(/\./g,'\.') + '$');
+                                    if ( regex.test(url) ) {
+                                      path2tarball += extension;
+                                    }
+                                  };
+                              ['.tar.gz', '.tgz', '.zip'].forEach(getExtension(extension));
+                              this.download(url, storageFile,
+                                function (err, response) {
+                                  if ( err ) then(err);
+                                  else {
+                                    /** VERIFY SHASUM **/
+                                    var labShasum = module.install.get[Object.keys(module.install.get)[0]].shasum;
+                                    if ( labShasum ) {
+                                      /** Get lab shasum **/
+                                      this.shasum(labShasum, version.release,
+                                        function (err, _shasum) {
+                                          if ( err ) then(err);
+                                          else {
+                                            /** Compare lab shasum with tarball shasum **/
+                                            var getStorageFileShasum = this.require('child_process')
+                                              .spawn('sha1sum', [
+                                                storageFile]);
+                                            getStorageFileShasum.on('error',
+                                              function (err) {
+                                                then(err);
+                                              }
+                                            );
+                                            getStorageFileShasum.stdout.on('data',
+                                              function (data) {
+                                                var shasum = data.toString().trim().split(/\s/)[0];
+                                                /** If shasum does not match **/
+                                                if ( shasum != shasum ) {
+                                                  then(new Error('Shasum not matching'));
+                                                }
+                                                /** If shasum matches **/
+                                                else {
+                                                  retry();
+                                                }
+                                              }
+                                            );
+                                          }
+                                        }
+                                      );
+                                    }
+                                  }
+                                }.bind(this)
+                              );
+                              break;
+                          }
+                        }
+                      }
+                    }
+                  );
+                }
+              }
+            );
+          } else {
+            /** CREATE MODULE FOLDER **/
+            fs.mkdir(path2module,
+              function (err) {
+                if ( err ) then(err);
+                else {
+                  retry();
+                }
+              }
+            );
+          }
+        }
+      );
+    } else {
+      /** VERIFY VERSION **/
+      this.version(module, version,
+        function (err, version) {
+          if ( err ) then(err);
+          else {
+            retry();
+          }
+        }
+      );
+    }
+  }
+  /** GET MODULE PROFILE **/
+  else {
     this.lab({name: module},
       function (err, modules) {
         if ( err ) then(err);
@@ -476,24 +611,19 @@ apt.prototype.install = function(module, version, then) {
           if ( ! modules.length ) {
             then(new Error('No modules found'));
           } else {
-            this.install(modules[0], version, then);
+            module = modules[0];
+            retry();
           }
         }
-      }.bind(this)
+      }
     );
   }
-  /** Retrieve version information **/
-  else if ( ! (version instanceof ModelRelease) ) {
-    this.echo({installing: ('Looking for version matching ' + version)});
-    this.version(module, version,
-      function (err, version) {
-        if ( err ) then(err);
-        else {
-          this.install(module, version, then);
-        }
-      }.bind(this)
-    );
-  } else {
+
+  return;
+      
+  
+  if( 1==1 ) {}
+  else {
     echo.installing[module.name] = { version: version.release };
     this.echo(echo);
     var installPath = this.require('path').dirname(__dirname) +
