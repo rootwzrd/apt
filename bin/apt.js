@@ -1,9 +1,10 @@
 require('colors');
 
-var async = require('async'),
-  fs = require('fs'),
-  path = require('path'),
-  glob = require('glob');
+var async   = require('async'),
+  fs        = require('fs'),
+  path      = require('path'),
+  glob      = require('glob'),
+  cp        = require('child_process');
 
 /** MODEL : LAB MODULE
 /*  === === ===
@@ -51,7 +52,7 @@ apt.prototype.require = function(module) {
 };
 
 apt.prototype.echo = function(message) {
-  console.warn(JSON.stringify(message, null, 0).grey.bold);
+  //console.warn(JSON.stringify(message, null, 0).grey.bold);
 };
 
 apt.prototype.error = function(error, Throw) {
@@ -470,13 +471,14 @@ apt.prototype.sortVersions = function(versions) {
 };
 
 apt.prototype.install = function(module, version, then) {
-  var echo        = { installing: {} },
-    binder        = this,
-    path2modules  = path.dirname(__dirname) + '/modules',
-    path2storage  = path2modules + '/.storage',
-    path2tarball  = path2storage,
-    path2module   = path2modules,
-    path2release  = path2modules,
+  var echo          = { installing: {} },
+    binder          = this,
+    path2modules    = path.dirname(__dirname) + '/modules',
+    path2storage    = path2modules + '/.storage',
+    path2tarball    = path2storage,
+    path2module     = path2modules,
+    path2release    = path2modules,
+    path2installers = path2modules + '/.installers',
     messageaction,
     actiondone,
     retry     = function () {
@@ -485,12 +487,14 @@ apt.prototype.install = function(module, version, then) {
 
   /** VERIFY THAT MODULE IS A MODULE PROFILE **/
   if ( (module instanceof ModelLabModule) ) {
+    console.log('✓ module is a module profile');
     path2module   += '/' + module.name;
     path2tarball  += '/' + module.name + '-';
     path2release  += '/' + module.name;
     
     /* MAKE SURE VERSION IS VERIFIED **/
     if ( (version instanceof ModelRelease) ) {
+      console.log('✓ version is verified');
       path2tarball += version.release;
       path2release += '/' + version.release;
       
@@ -498,6 +502,7 @@ apt.prototype.install = function(module, version, then) {
       fs.exists(path2module,
         function (exists) {
           if ( exists ) {
+            console.log('✓ module folder exists');
             /** VERIFY THAT MODULE RELEASE FOLDER EXISTS **/
             fs.exists(path2release,
               function (exists) {
@@ -511,10 +516,122 @@ apt.prototype.install = function(module, version, then) {
                       else {
                         if ( files.length ) {
                           path2tarball = files[0];
-
+                          console.log('✓ tarball has already been downloaded');
                           /** UNCOMPRESS TARBALL **/
+                          var uncompress = cp.spawn('tar', [
+                            '-xzf', path2tarball, '-C', path2installers]);
+                          uncompress.on('error',
+                            function (err) {
+                              then(err);
+                            }
+                          );
+                          uncompress.on('close',
+                            function (code) {
+                              console.log('✓ tarball has been uncompressed');
+                              /** CONFIGURE **/
+                              /** get folder name that was inside tarball **/
+                              var lz = cp.spawn('lz', [path2tarball]),
+                                installFolder;
+                              lz.on('error',
+                                function (error) {
+                                  throw error;
+                                }
+                              );
+                              lz.on('close',
+                                function (code) {
+                                  if ( code && ! installFolder ) {
+                                    throw(new Error('lz failed with code: ' + code));
+                                  } else {
+                                    var configure = cp.spawn('./configure', [
+                                      '--prefix=' + path2release], {
+                                        cwd: path2installers + '/' + installFolder.replace(/\//, '')
+                                      }
+                                    );
+                                    configure.on('error',
+                                      function (err) {
+                                        throw err;
+                                      }
+                                    );
+                                    configure.on('close',
+                                      function (code) {
+                                        if ( code ) {
+                                          throw(new Error('configure failed with code: ' + code));
+                                        }
+                                        var make = cp.spawn('make', [], {
+                                          cwd: path2installers + '/' + installFolder.replace(/\//, '')
+                                        });
+                                        make.on('error',
+                                          function (err) {
+                                            throw err;
+                                          }
+                                        );
+                                        make.on('close',
+                                          function (code) {
+                                            if ( code ) {
+                                              throw(new Error('configure failed with code: ' + code));
+                                            }
+                                            var install = cp.spawn('make install', [], {
+                                              cwd: path2installers + '/' + installFolder.replace(/\//, '')
+                                            });
+                                            install.on('error',
+                                              function (err) {
+                                                throw err;
+                                              }
+                                            );
+                                            install.on('close',
+                                              function (code) {
+                                                console.log({code: code});
+                                              }
+                                            );
+                                            install.stdout.on('data',
+                                              function (data) {
+                                                console.log({stdout: data.toString() });
+                                              }
+                                            );
+                                            install.stderr.on('data',
+                                              function (data) {
+                                                console.log({stderr: data.toString() });
+                                              }
+                                            );
+                                          }
+                                        );
+                                        make.stdout.on('data',
+                                          function (data) {
+                                            console.log({stdout: data.toString() });
+                                          }
+                                        );
+                                        make.stderr.on('data',
+                                          function (data) {
+                                            console.log({stderr: data.toString() });
+                                          }
+                                        );
+                                      }
+                                    );
+                                    configure.stdout.on('data',
+                                      function (data) {
+                                        console.log({stdout: data.toString() });
+                                      }
+                                    );
+                                    configure.stderr.on('data',
+                                      function (data) {
+                                        console.log({stderr: data.toString() });
+                                      }
+                                    );
+                                  }
+                                }
+                              );
+                              lz.stdout.on('data',
+                                function (data) {
+                                  if ( data.toString().match(/^d/) && ! installFolder ) {
+                                    installFolder = data.toString().split(/\s+/)[5];
+                                  }
+                                }
+                              );
+                            }
+                          );
                           /** BUILD **/
                         } else {
+                          console.log('! Tarball has not been downloaded');
                           /** DOWNLOAD TARBALL **/
                           switch ( Object.keys(module.install.get)[0] ) {
                             case 'download':
@@ -526,8 +643,8 @@ apt.prototype.install = function(module, version, then) {
                                       path2tarball += extension;
                                     }
                                   };
-                              ['.tar.gz', '.tgz', '.zip'].forEach(getExtension(extension));
-                              this.download(url, storageFile,
+                              ['.tar.gz', '.tgz', '.zip'].forEach(getExtension);
+                              this.download(url, path2tarball,
                                 function (err, response) {
                                   if ( err ) then(err);
                                   else {
@@ -572,10 +689,10 @@ apt.prototype.install = function(module, version, then) {
                           }
                         }
                       }
-                    }
+                    }.bind(this)
                   );
                 }
-              }
+              }.bind(this)
             );
           } else {
             /** CREATE MODULE FOLDER **/
@@ -585,25 +702,28 @@ apt.prototype.install = function(module, version, then) {
                 else {
                   retry();
                 }
-              }
+              }.bind(this)
             );
           }
-        }
+        }.bind(this)
       );
     } else {
+      console.log('⚠ version is not verified');
       /** VERIFY VERSION **/
       this.version(module, version,
-        function (err, version) {
+        function (err, v) {
           if ( err ) then(err);
           else {
+            version = v;
             retry();
           }
-        }
+        }.bind(this)
       );
     }
   }
   /** GET MODULE PROFILE **/
   else {
+    console.log('⚠ module is a not a module profile');
     this.lab({name: module},
       function (err, modules) {
         if ( err ) then(err);
