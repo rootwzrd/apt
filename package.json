@@ -1,10 +1,10 @@
 {
   "name": "apt",
-  "version": "0.0.0",
+  "version": "0.0.0-dev",
   "description": "ERROR: No README.md file found!",
   "main": "main.js",
   "bin": {
-    "⚡": "⚡.js"
+    "apt": "bin/apt.js"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
