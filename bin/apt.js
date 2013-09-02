@@ -101,8 +101,26 @@ apt.prototype.station = function(modules, then) {
   );
 };
 
+apt.prototype.stationInsert = function (module, version, then) {
+  this.db(function (err, db) {
+    if ( err ) {
+      then(err);
+    } else {
+      db.collection('station', function (err, station) {
+        if ( err ) {
+          then(err);
+        } else {
+          station.insert({
+            name: module.name,
+            version: version.release
+          }, then);
+        }
+      });
+    }
+  });
+};
+
 apt.prototype.lab = function(search, then) {
-  this.echo({lab: {'searching for': search}});
   if ( typeof search == 'string' ) {
     search = { name: search };
   }
@@ -244,7 +262,6 @@ apt.prototype.version = function(module, version, then) {
   var _module = (module instanceof ModelLabModule) ? module.name : module,
     _version = (version instanceof ModelRelease) ? Object.keys(version)[0] : (
       version ? version : 'undefined');
-  this.echo({version: { module: _module, version: _version}});
   if ( ! (module instanceof ModelLabModule) ) {
     this.lab(module,
       function (err, modules) {
@@ -470,261 +487,225 @@ apt.prototype.sortVersions = function(versions) {
   return sort;
 };
 
-apt.prototype.install = function(module, version, then) {
-  var echo          = { installing: {} },
-    binder          = this,
-    path2modules    = path.dirname(__dirname) + '/modules',
-    path2storage    = path2modules + '/.storage',
-    path2tarball    = path2storage,
-    path2module     = path2modules,
-    path2release    = path2modules,
-    path2installers = path2modules + '/.installers',
-    messageaction,
-    actiondone,
-    retry     = function () {
-      this.install(module, version, then);
-    }.bind(this);
+apt.prototype.createModuleFolder = function (module, then) {
+  var folder = path.dirname(__dirname) + '/modules/' + module.name;
+  fs.exists(folder, function (exists) {
+    if ( exists ) {
+      then(null, 1);
+    } else {
+      fs.mkdir(folder, then);
+    }
+  });
+};
 
-  /** VERIFY THAT MODULE IS A MODULE PROFILE **/
-  if ( (module instanceof ModelLabModule) ) {
-    console.log('✓ module is a module profile');
-    path2module   += '/' + module.name;
-    path2tarball  += '/' + module.name + '-';
-    path2release  += '/' + module.name;
-    
-    /* MAKE SURE VERSION IS VERIFIED **/
-    if ( (version instanceof ModelRelease) ) {
-      console.log('✓ version is verified');
-      path2tarball += version.release;
-      path2release += '/' + version.release;
-      
-      /** CHECK THAT MODULE FOLDER EXISTS **/
-      fs.exists(path2module,
-        function (exists) {
-          if ( exists ) {
-            console.log('✓ module folder exists');
-            /** VERIFY THAT MODULE RELEASE FOLDER EXISTS **/
-            fs.exists(path2release,
-              function (exists) {
-                if ( exists ) {
-                  console.log('ALREADY INSTALLED!');
-                } else {
-                  /** CHECK IF TARBALL HAS BEEN DOWNLOADED **/
-                  glob(path2tarball + '.*',
-                    function (err, files) {
-                      if ( err ) then(err);
-                      else {
-                        if ( files.length ) {
-                          path2tarball = files[0];
-                          console.log('✓ tarball has already been downloaded');
-                          /** UNCOMPRESS TARBALL **/
-                          var uncompress = cp.spawn('tar', [
-                            '-xzf', path2tarball, '-C', path2installers]);
-                          uncompress.on('error',
+apt.prototype.downloadTarBall = function (module, version, then) {
+  var tarball = path.dirname(__dirname) + '/modules/.storage/' +
+    module.name + '-' + version.release;
+  glob(tarball + '.*', function (err, files) {
+    if ( err ) {
+      then(err);
+    } else {
+      if ( files.length ) {
+        then(null, files[0]);
+      } else {
+        switch ( Object.keys(module.install.get)[0] ) {
+          case 'download':
+            var url = module.install.get.download.url
+                .replace(/\{\{version\}\}/g, version.release),
+              getExtension = function (extension) {
+                  var regex = new RegExp(extension.replace(/\./g,'\.') + '$');
+                  if ( regex.test(url) ) {
+                    tarball += extension;
+                  }
+                };
+            ['.tar.gz', '.tgz', '.zip'].forEach(getExtension);
+
+            this.download(url, tarball,
+              function (err, response) {
+                if ( err ) then(err);
+                else {
+                  /** VERIFY SHASUM **/
+                  var labShasum = module.install.get[Object.keys(module.install.get)[0]].shasum;
+                  if ( labShasum ) {
+                    /** Get lab shasum **/
+                    this.shasum(labShasum, version.release,
+                      function (err, _shasum) {
+                        if ( err ) then(err);
+                        else {
+                          /** Compare lab shasum with tarball shasum **/
+                          var getStorageFileShasum = this.require('child_process')
+                            .spawn('sha1sum', [
+                              tarball]);
+                          getStorageFileShasum.on('error',
                             function (err) {
                               then(err);
                             }
                           );
-                          uncompress.on('close',
-                            function (code) {
-                              console.log('✓ tarball has been uncompressed');
-                              /** CONFIGURE **/
-                              /** get folder name that was inside tarball **/
-                              var lz = cp.spawn('lz', [path2tarball]),
-                                installFolder;
-                              lz.on('error',
-                                function (error) {
-                                  throw error;
-                                }
-                              );
-                              lz.on('close',
-                                function (code) {
-                                  if ( code && ! installFolder ) {
-                                    throw(new Error('lz failed with code: ' + code));
-                                  } else {
-                                    var configure = cp.spawn('./configure', [
-                                      '--prefix=' + path2release], {
-                                        cwd: path2installers + '/' + installFolder.replace(/\//, '')
-                                      }
-                                    );
-                                    configure.on('error',
-                                      function (err) {
-                                        throw err;
-                                      }
-                                    );
-                                    configure.on('close',
-                                      function (code) {
-                                        if ( code ) {
-                                          throw(new Error('configure failed with code: ' + code));
-                                        }
-                                        var make = cp.spawn('make', [], {
-                                          cwd: path2installers + '/' + installFolder.replace(/\//, '')
-                                        });
-                                        make.on('error',
-                                          function (err) {
-                                            throw err;
-                                          }
-                                        );
-                                        make.on('close',
-                                          function (code) {
-                                            if ( code ) {
-                                              throw(new Error('configure failed with code: ' + code));
-                                            }
-                                            var install = cp.spawn('make install', [], {
-                                              cwd: path2installers + '/' + installFolder.replace(/\//, '')
-                                            });
-                                            install.on('error',
-                                              function (err) {
-                                                throw err;
-                                              }
-                                            );
-                                            install.on('close',
-                                              function (code) {
-                                                console.log({code: code});
-                                              }
-                                            );
-                                            install.stdout.on('data',
-                                              function (data) {
-                                                console.log({stdout: data.toString() });
-                                              }
-                                            );
-                                            install.stderr.on('data',
-                                              function (data) {
-                                                console.log({stderr: data.toString() });
-                                              }
-                                            );
-                                          }
-                                        );
-                                        make.stdout.on('data',
-                                          function (data) {
-                                            console.log({stdout: data.toString() });
-                                          }
-                                        );
-                                        make.stderr.on('data',
-                                          function (data) {
-                                            console.log({stderr: data.toString() });
-                                          }
-                                        );
-                                      }
-                                    );
-                                    configure.stdout.on('data',
-                                      function (data) {
-                                        console.log({stdout: data.toString() });
-                                      }
-                                    );
-                                    configure.stderr.on('data',
-                                      function (data) {
-                                        console.log({stderr: data.toString() });
-                                      }
-                                    );
-                                  }
-                                }
-                              );
-                              lz.stdout.on('data',
-                                function (data) {
-                                  if ( data.toString().match(/^d/) && ! installFolder ) {
-                                    installFolder = data.toString().split(/\s+/)[5];
-                                  }
-                                }
-                              );
+                          getStorageFileShasum.stdout.on('data',
+                            function (data) {
+                              var shasum = data.toString().trim().split(/\s/)[0];
+                              /** If shasum does not match **/
+                              if ( shasum != labShasum ) {
+                                then(new Error('Shasum not matching'));
+                              }
+                              /** If shasum matches **/
+                              else {
+                                then(null, tarball);
+                              }
                             }
                           );
-                          /** BUILD **/
-                        } else {
-                          console.log('! Tarball has not been downloaded');
-                          /** DOWNLOAD TARBALL **/
-                          switch ( Object.keys(module.install.get)[0] ) {
-                            case 'download':
-                              var url = module.install.get.download.url
-                                  .replace(/\{\{version\}\}/g, version.release),
-                                getExtension = function (extension) {
-                                    var regex = new RegExp(extension.replace(/\./g,'\.') + '$');
-                                    if ( regex.test(url) ) {
-                                      path2tarball += extension;
-                                    }
-                                  };
-                              ['.tar.gz', '.tgz', '.zip'].forEach(getExtension);
-                              this.download(url, path2tarball,
-                                function (err, response) {
-                                  if ( err ) then(err);
-                                  else {
-                                    /** VERIFY SHASUM **/
-                                    var labShasum = module.install.get[Object.keys(module.install.get)[0]].shasum;
-                                    if ( labShasum ) {
-                                      /** Get lab shasum **/
-                                      this.shasum(labShasum, version.release,
-                                        function (err, _shasum) {
-                                          if ( err ) then(err);
-                                          else {
-                                            /** Compare lab shasum with tarball shasum **/
-                                            var getStorageFileShasum = this.require('child_process')
-                                              .spawn('sha1sum', [
-                                                storageFile]);
-                                            getStorageFileShasum.on('error',
-                                              function (err) {
-                                                then(err);
-                                              }
-                                            );
-                                            getStorageFileShasum.stdout.on('data',
-                                              function (data) {
-                                                var shasum = data.toString().trim().split(/\s/)[0];
-                                                /** If shasum does not match **/
-                                                if ( shasum != shasum ) {
-                                                  then(new Error('Shasum not matching'));
-                                                }
-                                                /** If shasum matches **/
-                                                else {
-                                                  retry();
-                                                }
-                                              }
-                                            );
-                                          }
-                                        }
-                                      );
-                                    }
-                                  }
-                                }.bind(this)
-                              );
-                              break;
-                          }
                         }
                       }
-                    }.bind(this)
-                  );
+                    );
+                  }
                 }
               }.bind(this)
             );
-          } else {
-            /** CREATE MODULE FOLDER **/
-            fs.mkdir(path2module,
-              function (err) {
-                if ( err ) then(err);
-                else {
-                  retry();
+            break;
+        }
+      }
+    }
+  });
+};
+
+apt.prototype.extractTarBall = function (tarball, module, version, then) {
+  var lz = cp.spawn('lz', [tarball]),
+    installFolder;
+  lz.on('error',
+    function (err) {
+      then(err);
+    }
+  );
+  lz.on('close',
+    function (code) {
+      if ( code && ! installFolder ) {
+        then(new Error('lz failed with code: ' + code));
+      } else {
+        fs.exists(path.dirname(__dirname) + '/modules/.installers/' + installFolder,
+          function (exists) {
+            if ( exists ) {
+              then(null, installFolder);
+            } else {
+              var uncompress = cp.spawn('tar', [
+                '-xzf', tarball, '-C', path.dirname(__dirname) + '/modules/.installers']);
+              uncompress.on('error',
+                function (err) {
+                  then(err);
                 }
-              }.bind(this)
-            );
-          }
-        }.bind(this)
-      );
+              );
+              uncompress.on('close',
+                function (code) {
+                  if ( code ) {
+                    then(new Error('Could not uncompress tarball (' + code + ')'));
+                  } else {
+                    then(null, installFolder);
+                  }
+                }
+              );
+            }
+          });
+      }
+    }
+  );
+  lz.stdout.on('data',
+    function (data) {
+      if ( data.toString().match(/^d/) && ! installFolder ) {
+        installFolder = data.toString().split(/\s+/)[5];
+      }
+    }
+  );
+};
+
+apt.prototype.make = function (module, version, installer, then) {
+  var releaseFolder = path.dirname(__dirname) + '/modules/' +
+    module.name + '/' + version.release;
+  fs.exists(releaseFolder, function (exists) {
+    if ( exists ) {
+      then(null, releaseFolder);
     } else {
-      console.log('⚠ version is not verified');
-      /** VERIFY VERSION **/
-      this.version(module, version,
-        function (err, v) {
-          if ( err ) then(err);
-          else {
-            version = v;
-            retry();
+      var configure = cp.spawn('./configure', [
+        '--prefix=' + releaseFolder], {
+          cwd: path.dirname(__dirname) + '/modules/.installer/' + installer
+        }
+      );
+      configure.on('error',
+        function (err) {
+          then(err);
+        }
+      );
+      configure.on('close',
+        function (code) {
+          if ( code ) {
+            then(new Error('configure failed with code: ' + code));
           }
-        }.bind(this)
+          var make = cp.spawn('make', [], {
+            cwd: path.dirname(__dirname) + '/modules/.installer/' + installer
+          });
+          make.on('error',
+            function (err) {
+              then(err);
+            }
+          );
+          make.on('close',
+            function (code) {
+              if ( code ) {
+                then(new Error('configure failed with code: ' + code));
+              }
+              var install = cp.spawn('make install', [], {
+                cwd: path.dirname(__dirname) + '/modules/.installer/' + installer
+              });
+              install.on('error',
+                function (err) {
+                  then(err);
+                }
+              );
+              install.on('close',
+                function (code) {
+                  then(null, releaseFolder);
+                }
+              );
+              install.stdout.on('data',
+                function (data) {
+                  console.log({stdout: data.toString() });
+                }
+              );
+              install.stderr.on('data',
+                function (data) {
+                  console.log({stderr: data.toString() });
+                }
+              );
+            }
+          );
+          make.stdout.on('data',
+            function (data) {
+              console.log({stdout: data.toString() });
+            }
+          );
+          make.stderr.on('data',
+            function (data) {
+              console.log({stderr: data.toString() });
+            }
+          );
+        }
+      );
+      configure.stdout.on('data',
+        function (data) {
+          console.log({stdout: data.toString() });
+        }
+      );
+      configure.stderr.on('data',
+        function (data) {
+          console.log({stderr: data.toString() });
+        }
       );
     }
-  }
-  /** GET MODULE PROFILE **/
-  else {
-    console.log('⚠ module is a not a module profile');
-    this.lab({name: module},
+  });
+};
+
+apt.prototype.install = function(module, version, then) {
+  /** VERIFY THAT MODULE IS A MODULE PROFILE **/
+  if ( ! (module instanceof ModelLabModule) ) {
+    return this.lab({name: module},
       function (err, modules) {
         if ( err ) then(err);
         else {
@@ -732,188 +713,58 @@ apt.prototype.install = function(module, version, then) {
             then(new Error('No modules found'));
           } else {
             module = modules[0];
-            retry();
+            this.install(module, version, then);
           }
-        }
-      }
-    );
-  }
-
-  return;
-      
-  
-  if( 1==1 ) {}
-  else {
-    echo.installing[module.name] = { version: version.release };
-    this.echo(echo);
-    var installPath = this.require('path').dirname(__dirname) +
-      '/modules/' + module.name;
-    /** Check if module already has a folder **/
-    this.require('fs').exists(installPath,
-      function (exists) {
-        if ( ! exists ) {
-          /** Create module folder if do not exists  **/
-          this.require('fs').mkdir(installPath,
-            function (err) {
-              if ( err ) then(err);
-              else {
-                this.install(module, version, then);
-              }
-            }.bind(this)
-          );
-        } else {
-          installPath += '/' + version.release;
-          /** Check if release has folder **/
-          this.require('fs').exists(installPath,
-            function (exists) {
-              /** If release has no folder **/
-              if ( ! exists ) {
-                var storageFile = this.require('path').dirname(__dirname) +
-                  '/modules/.storage/' + module.name + '-' + version.release + '.*';
-                /** Globbing search of a release tarball **/
-                this.require('glob')(storageFile,
-                  function (err, files) {
-                    if ( err ) then(err);
-                    else {
-                      /** If no tarball found, use install info from profile **/
-                      if ( ! files.length ) {
-                        var get = Object.keys(module.install.get)[0];
-                        switch ( get ) {
-                          case 'download':
-                            var url = module.install.get.download.url
-                                .replace(/\{\{version\}\}/g, version.release),
-                              getExtension = function (extension) {
-                                  var regex = new RegExp(extension.replace(/\./g,'\.') + '$');
-                                  if ( regex.test(url) ) {
-                                    if ( storageFile.match(/\.\*$/) ) {
-                                      storageFile = storageFile.replace(/\.\*$/, extension);
-                                    }
-                                  }
-                                };
-                            ['.tar.gz'].forEach(getExtension(extension));
-                            this.download(url, storageFile,
-                              function (err, response) {
-                                if ( err ) then(err);
-                                else {
-                                  console.log(response);
-                                }
-                              }
-                            );
-                            break;
-                        }
-                      }
-                      /** If tarball found **/
-                      else {
-                        storageFile = files[0];
-                        var labShasum = module.install.get[Object.keys(module.install.get)[0]].shasum;
-                        if ( labShasum ) {
-                          /** Get lab shasum **/
-                          this.shasum(labShasum, version.release,
-                            function (err, _shasum) {
-                              if ( err ) then(err);
-                              else {
-                                /** Compare lab shasum with tarball shasum **/
-                                var getStorageFileShasum = this.require('child_process')
-                                  .spawn('sha1sum', [
-                                    storageFile]);
-                                getStorageFileShasum.on('error',
-                                  function (err) {
-                                    then(err);
-                                  }
-                                );
-                                getStorageFileShasum.stdout.on('data',
-                                  function (data) {
-                                    var shasum = data.toString().trim().split(/\s/)[0];
-                                    /** If shasum does not match **/
-                                    if ( shasum != shasum ) {
-                                      then(new Error('Shasum not matching'));
-                                    }
-                                    /** If shasum matches **/
-                                    else {
-                                      /** Create the target directory **/
-                                      var targetDir = this.require('path').dirname(__dirname) +
-                                        '/modules/.storage/tmp-' + module.name + '-' + version.release;
-                                      this.require('fs').mkdir(targetDir,
-                                        function (err) {
-                                          if ( err ) then(err);
-                                          else {
-                                            var extractTarBall = this.require('child_process')
-                                              .spawn('tar', ['xzf', storageFile], { cwd: targetDir });
-                                            extractTarBall.on('error',
-                                              function (err) {
-                                                then(err);
-                                              }
-                                            );
-                                            extractTarBall.on('close',
-                                              function (code) {
-                                                if ( code ) {
-                                                  then(new Error('could not untar, got: ' + code));
-                                                } else {
-                                                  this.require('glob')(targetDir + '/*',
-                                                    function (err, files) {
-                                                      if ( err ) then(err);
-                                                      else {
-                                                        if ( ! files.length ) {
-                                                          then(new Error('No globbing found . this should not happen'));
-                                                        } else if ( files.length > 1 ) {
-                                                          then(new Error('Too many globbing found . this should not happen'));
-                                                        } else {
-                                                          var mvdir = files[0];
-                                                          this.require('wrench').copyDirRecursive(mvdir,
-                                                            this.require('path').dirname(__dirname) + '/modules/' +
-                                                              module.name + '/' + version.release,
-                                                            {
-                                                              forceDelete: false,
-                                                              excludeHiddenUnix: false,
-                                                              preserveFiles: false,
-                                                              inflateSymLinks: false
-                                                            },
-                                                            function (err) {
-                                                              if (err) {
-                                                                then(err);
-                                                              } else {
-                                                                this.require('wrench').rmdirRecursive(this.require('path')
-                                                                    .dirname(mvdir),
-                                                                  function (err) {
-                                                                    if ( err ) then(err);
-                                                                    else {
-                                                                      console.log('ok');
-                                                                    }
-                                                                  }
-                                                                );
-                                                              }
-                                                            }.bind(this)
-                                                          );
-                                                        }
-                                                      }
-                                                    }.bind(this)
-                                                  );
-                                                }
-                                              }.bind(this)
-                                            );
-                                          }
-                                        }.bind(this)
-                                      );
-                                    }
-                                  }.bind(this)
-                                );
-                              }
-                            }.bind(this)
-                          );
-                        }
-                      }
-                    }
-                  }.bind(this)
-                );
-              } else {
-                then(new Error('Module version already installed'));
-              }
-            }.bind(this)
-          );
         }
       }.bind(this)
     );
   }
+
+  /* MAKE SURE VERSION IS VERIFIED **/
+  if ( ! (version instanceof ModelRelease) ) {
+    return this.version(module, version,
+      function (err, version) {
+        if ( err ) then(err);
+        else {
+          this.install(module, version, then);
+        }
+      }.bind(this)
+    );
+  }
+
+  this.station({ name: module.name }, function (err, results) {
+    if ( err ) {
+      then(err);
+    } else if ( ! results.length ) {
+      this.downloadTarBall(module, version, function (err, tarball) {
+        if ( err ) {
+          then(err);
+        } else {
+          this.extractTarBall(tarball, module, version, function (err, installer) {
+            if ( err ) {
+              then(err);
+            } else {
+              this.make(module, version, installer, function (err, folder) {
+                if ( err ) {
+                  then(err);
+                } else {
+                  this.stationInsert(module, version, function (err, insert) {
+                    if ( err ) {
+                      then(err);
+                    } else {
+                      then(null, module.name, version.release);
+                    }
+                  });
+                }
+              }.bind(this));
+            }
+          }.bind(this));
+        }
+      }.bind(this));
+    } else {
+      console.log('ALREADY INSTALLED: ' + results[0].version);
+    }
+  }.bind(this));
 };
 
 apt.prototype.download = function(source, to, then, method) {
@@ -1049,12 +900,12 @@ switch ( action ) {
     break;
   case 'install':
     Apt.install(module, version,
-      function (err, response) {
+      function (err, module, version) {
         if ( err ){
           throw err;
         }
         else {
-          console.log({bin: {responseInstall: response}});
+          console.log({module: module, version: version});
         }
       }
     );
