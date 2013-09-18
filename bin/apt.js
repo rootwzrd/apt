@@ -720,22 +720,22 @@ apt.prototype.install = function(module, version, then) {
     );
   }
 
-  /* MAKE SURE VERSION IS VERIFIED **/
-  if ( ! (version instanceof ModelRelease) ) {
-    return this.version(module, version,
-      function (err, version) {
-        if ( err ) then(err);
-        else {
-          this.install(module, version, then);
-        }
-      }.bind(this)
-    );
-  }
-
   this.station({ name: module.name }, function (err, results) {
     if ( err ) {
       then(err);
     } else if ( ! results.length ) {
+      /* MAKE SURE VERSION IS VERIFIED **/
+      if ( ! (version instanceof ModelRelease) ) {
+        return this.version(module, version,
+          function (err, version) {
+            if ( err ) then(err);
+            else {
+              this.install(module, version, then);
+            }
+          }.bind(this)
+        );
+      }
+      
       this.downloadTarBall(module, version, function (err, tarball) {
         if ( err ) {
           then(err);
@@ -762,7 +762,7 @@ apt.prototype.install = function(module, version, then) {
         }
       }.bind(this));
     } else {
-      console.log('ALREADY INSTALLED: ' + results[0].version);
+      then(new Error('Already installed!'), module.name, results[0].version);
     }
   }.bind(this));
 };
@@ -901,11 +901,18 @@ switch ( action ) {
   case 'install':
     Apt.install(module, version,
       function (err, module, version) {
+        Apt.conn.close();
         if ( err ){
-          throw err;
+          switch ( err.toString().replace(/^Error: /, '') ) {
+            case 'Already installed!':
+              console.log(module + ' already installed at version ' + version);
+              break;
+            default:
+              throw err;
+          }
         }
         else {
-          console.log({module: module, version: version});
+          console.log(module + ' installed at version ' + version);
         }
       }
     );
