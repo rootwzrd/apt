@@ -1,0 +1,16 @@
+[
+	{
+		"name": "mysql",
+		"install": {
+			"get": {
+				"download": {
+					"url": {
+            "5.1.x": "http://downloads.mysql.com/archives/mysql-{{major version}}.{{minor version}}/mysql-{{version}}-linux-x86_64-glibc23.tar.gz"
+          },
+          "tarball": "tar.gz"
+				}
+			},
+      "build": "copy"
+		}
+	}
+]
