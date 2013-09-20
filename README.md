@@ -1,8 +1,17 @@
 apt
 ======
 
-apt is an installer for Linux. apt does not require root privileges to install software. Also, apt can run in parallel different versions of the same software.
+## Very, very Alpha!
 
-# Audience
+apt is like npm, but for Linux sources. apt can maintain per-project dependencies,
 
-Web developers using Linux for their development needs.
+# Example
+
+    # View available modules
+    apt.search(); # terminal> apt search
+
+    # Install a module
+    apt install mysql; # terminal> apt install mysql
+
+    # View installed modules
+    apt view; # terminal> apt view
