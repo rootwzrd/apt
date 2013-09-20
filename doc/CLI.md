@@ -5,32 +5,18 @@ apt is an installer for Linux. apt does not require root privileges to install s
 
 # Command Line Interface
 
-## List modules installed on my station
+## List modules installed in project
 
-    $ apt station
-        ⇾ JSON Array [ JSON Object #model.station.module {} ]
+    $ apt view
+    $ apt view name=mysql
+    $ apt view type=database-server
     
-## List modules from the lab
+## List modules from the store
 
-    $ apt lab
-        ⇾ JSON Array [ JSON Object #model.lab.module {} ]
-    
-## Get a module latest version
-
-    $ apt latest <module>
-        ⇾ JSON Object {<version>: <shasum>}
-    
-## Expose all module versions
-
-    $ apt versions <module>
-        ⇾ JSON Array [ JSON Object {<version>: <shasum>} ]
-    
-## Resolve a module semantic version
-
-    $ apt version <module> <semantic version>
-        ⇾ JSON Object {<version>: <shasum>}
+    $ apt search
+    $ apt search name=mysql
+    $ apt search type=database-server
     
 ## Install a module
 
-    $ apt install <module> [latest | <release> | <semantic version>]
-        ⇾ JSON Object #model.lab.module {}
+    $ apt install <module>@<version>
