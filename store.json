@@ -1,6 +1,18 @@
 [
 	{
 		"name": "mysql",
+    "type": "Database server",
+    "latest": {
+      "static": "5.1.63",
+      "dynamic": {
+        "scrape": {
+          "from": "http://dev.mysql.com/downloads/mysql/",
+          "search": "mysql-(\\d+\\.\\d+\\.\\d+)-linux-glibc.-x86_64\\.tar\\.gz",
+          "extract": 1,
+          "group": false
+        }
+      }
+    },
 		"install": {
 			"get": {
 				"download": {
