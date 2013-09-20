@@ -11,7 +11,7 @@ apt is like npm, but for Linux sources. apt can maintain per-project dependencie
     apt.search(); # terminal> apt search
 
     # Install a module
-    apt install mysql; # terminal> apt install mysql
+    apt.install('mysql'); # terminal> apt install mysql
 
     # View installed modules
-    apt view; # terminal> apt view
+    apt.view(); # terminal> apt view
