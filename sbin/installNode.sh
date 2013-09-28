@@ -10,8 +10,8 @@ function apt.installNode() {
 
   cd ~/.apt/.sources;
 
-  # wget -O node-"$node_version".tar.gz $source ||
-  #   return 10;
+  wget -O node-"$node_version".tar.gz $source ||
+    return 10;
 
   tar -xzf node-"$node_version".tar.gz ||
     return 11;
