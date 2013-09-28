@@ -1,5 +1,4 @@
 /node_modules/*
 /sources/*
 /modules/*
-/db.json
-/local.json
+/apt/*
