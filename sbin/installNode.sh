@@ -1,13 +1,14 @@
 function apt.installNode() {
-  local aptPath="$1";
-  if [ ! "$aptPath" ]; then
-    aptPath=$(pwd);
-  fi
   local node_version=0.10.19;
   local source=https://github.com/joyent/node/archive/v"$node_version".tar.gz;
 
-  cd $aptPath/sources ||
+  mkdir ~/.apt ||
     return 1;
+
+  mkdir ~/.apt/.sources ||
+    return 2;
+
+  cd ~/.apt/.sources;
 
   # wget -O node-"$node_version".tar.gz $source ||
   #   return 10;
@@ -18,7 +19,7 @@ function apt.installNode() {
   cd node-"$node_version" ||
     return 13;
 
-  ./configure --prefix=$aptPath/sbin/lib/node/$node_version ||
+  ./configure --prefix=$HOME/.apt/node/$node_version ||
     return 14;
 
   make ||
@@ -30,7 +31,7 @@ function apt.installNode() {
   make clean ||
     return 17;
 
-  $aptPath/sbin/lib/node/$node_version/bin/npm install -g git+https://github.com/co2-git/apt.git ||
+  ~/.apt/node/$node_version/bin/npm install -g git+https://github.com/co2-git/apt.git ||
     return 18;
 
   apt && {

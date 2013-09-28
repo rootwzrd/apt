@@ -1,6 +1,6 @@
 {
   "name": "apt",
-  "version": "0.0.2-rc2",
+  "version": "0.0.2-rc3",
   "description": "apt is a source dependency manager",
   "main": "main.js",
   "bin": {
