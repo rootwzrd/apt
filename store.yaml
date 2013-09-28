@@ -1,0 +1,36 @@
+mysql:
+  type: Database server
+  latest:
+    static: 5.1.63
+  install:
+    5.x.x:
+      get:
+        download:
+          url: http://downloads.mysql.com/archives/mysql-{{major version}}.{{minor version}}/mysql-{{version}}-linux-x86_64-glibc23.tar.gz
+          format: tar.gz
+      build:
+        configure-make-install:
+          config:
+            prefix:
+              description: install architecture-independent files in PREFIX
+              default:
+                vendor: /usr/local
+                apt: {{module path}}
+            datadir:
+              description: read-only architecture-independent data
+              default:
+                vendor: DATAROOTDIR
+                apt: {{module path}}/data
+ncurses:
+  type: Terminal emulator
+  latest:
+    static: 5.7
+  install:
+    5.x:
+      get:
+        download: http://ftp.gnu.org/pub/gnu/ncurses/ncurses-5.{{minor version}}.tar.gz
+      build:
+        configure-make-install:
+          configure:
+            prefix:
+              description: install architecture-independent files in PREFIX

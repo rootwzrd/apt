@@ -1,7 +1,7 @@
 {
   "name": "apt",
-  "version": "0.0.1",
-  "description": "ERROR: No README.md file found!",
+  "version": "0.0.2",
+  "description": "apt is a source dependency manager",
   "main": "main.js",
   "bin": {
     "apt": "bin/apt.js"
@@ -22,6 +22,8 @@
     "glob": "3.2.6",
     "request-progress": "0.2.3",
     "wrench": "1.5.1",
-    "ncp": "0.4.2"
+    "ncp": "0.4.2",
+    "js-yaml": "2.1.0",
+    "ftp": "0.3.4"
   }
 }

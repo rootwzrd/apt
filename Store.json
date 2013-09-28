@@ -1,0 +1,148 @@
+[
+	{
+		"name": "mysql",
+    "type": "Database server",
+    "latest": {
+      "static": "5.1.63",
+      "dynamic": {
+        "scrape": {
+          "from": "http://dev.mysql.com/downloads/mysql/",
+          "search": "mysql-(\\d+\\.\\d+\\.\\d+)-linux-glibc.-x86_64\\.tar\\.gz",
+          "extract": 1,
+          "group": false
+        }
+      }
+    },
+    "dependencies": {
+      "5.x.x": {
+        "ncurses": "5.7"
+      }
+    },
+		"install": {
+      "5.*": {
+        "get": {
+          "download": {
+            "url": {
+              "5.1.x": "http://downloads.mysql.com/archives/mysql-{{major version}}.{{minor version}}/mysql-{{version}}-linux-x86_64-glibc23.tar.gz"
+            },
+            "tarball": "gzip"
+          }
+        },
+        "build": {
+          "configure-make-install": {
+            "configure": {
+              "prefix": {
+                "description": "install architecture-independent files in PREFIX",
+                "default": {
+                  "vendor": "/usr/local",
+                  "apt": "{{install path}}"
+                }
+              },
+              "datadir": {
+                "description": "read-only architecture-independent data",
+                "default": {
+                  "vendor": "/var/lib/mysql",
+                  "apt": "{{install path}}/data"
+                }
+              }
+            }
+          }
+        }
+      }
+		}
+	},
+  {
+    "name": "ncurses",
+    "type": "Terminal emulator",
+    "dependencies": {
+      "5.*": {
+        "gcc": "4.8.1"
+      }
+    },
+    "install": {
+      "5.*": {
+        "get": {
+          "download": {
+            "url": "http://ftp.gnu.org/pub/gnu/ncurses/ncurses-5.{{minor version}}.tar.gz",
+            "tarball": "gzip"
+          }
+        },
+        "build": {
+          "configure-make-install": {
+            "configure": {
+              "prefix": {
+                "description": "install architecture-independent files in PREFIX",
+                "default": {
+                  "vendor": "/usr/local",
+                  "apt": "{{install path}}"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "gcc",
+    "type": "C/C++ Compiler",
+    "dependencies": {
+      "4.x": {
+        "gmp": "4.2.1"
+      }
+    },
+    "install": {
+      "4.x": {
+        "get": {
+          "download": {
+            "url": "ftp://ftp.fu-berlin.de/unix/languages/gcc/releases/gcc-{{version}}/gcc-{{version}}.tar.gz",
+            "tarball": "gzip"
+          }
+        },
+        "build": {
+          "configure-make-install": {
+            "configure": {
+              "prefix": {
+                "description": "install architecture-independent files in PREFIX",
+                "default": {
+                  "vendor": "/usr/local",
+                  "apt": "{{install path}}"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "gmp",
+    "type": "Scientific",
+    "latest": "5.1.2",
+    "versions": [
+      "5.1.2"],
+    "install": {
+      "*": {
+        "get": {
+          "download": {
+            "url": "ftp://ftp.gmplib.org/pub/gmp/gmp-{{version}}.tar.bz2",
+            "compression": "bzip2"
+          }
+        },
+        "build": {
+          "configure-make-install": {
+            "configure": {
+              "prefix": {
+                "description": "install architecture-independent files in PREFIX",
+                "default": {
+                  "vendor": "/usr/local",
+                  "apt": "{{install path}}"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+]
