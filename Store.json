@@ -86,17 +86,64 @@
   {
     "name": "gcc",
     "type": "C/C++ Compiler",
-    "dependencies": {
+    "latest": "4.8.1",
+    "versions": [ "4.8.1"],
+    "dependencies2": {
       "4.x": {
-        "gmp": "4.2.1"
+        "gmp": "4.2.1",
+        "mpfr": "2.4.0",
+        "mpc": "0.8.1"
       }
     },
+    "dependencies": {},
     "install": {
       "4.x": {
         "get": {
           "download": {
             "url": "ftp://ftp.fu-berlin.de/unix/languages/gcc/releases/gcc-{{version}}/gcc-{{version}}.tar.gz",
-            "tarball": "gzip"
+            "compression": "gzip"
+          }
+        },
+        "build": {
+          "configure-make-install": {
+            "configure": {
+              "$before": "contrib/download_prerequisites",
+              "prefix": {
+                "description": "install architecture-independent files in PREFIX",
+                "default": {
+                  "vendor": "--prefix=/usr/local",
+                  "apt": "--prefix={{install path}}"
+                }
+              },
+              "--disable-isl-version-check": {},
+              "--disable-cloog-version-check": {}
+            },
+            "routine": [
+              ["./contrib/download_prerequisites", "{{install path}}"],
+              ["mkdir {{var path}}/gcc-objdir"],
+              ["{{source path}}/configure {{configure options}}", "{{var path}}/gcc-objdir}}"],
+              ["make", "{{var path}}/gcc-objdir}}"],
+              ["make install", "{{var path}}/gcc-objdir}}"],
+              ["make clean", "{{var path}}/gcc-objdir}}"]
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "gmp",
+    "type": "Scientific",
+    "latest": "5.1.2",
+    "versions": [
+      "4.2.1",
+      "5.1.2"],
+    "install": {
+      "*": {
+        "get": {
+          "download": {
+            "url": "ftp://ftp.gmplib.org/pub/gmp/gmp-{{version}}.tar.bz2",
+            "compression": "bzip2"
           }
         },
         "build": {
@@ -116,17 +163,74 @@
     }
   },
   {
-    "name": "gmp",
+    "name": "mpfr",
     "type": "Scientific",
-    "latest": "5.1.2",
-    "versions": [
-      "5.1.2"],
+    "latest": "3.1.2",
+    "versions": ["2.4.0"],
     "install": {
       "*": {
         "get": {
           "download": {
-            "url": "ftp://ftp.gmplib.org/pub/gmp/gmp-{{version}}.tar.bz2",
-            "compression": "bzip2"
+            "url" : "http://ftp.gnu.org/gnu/mpfr/mpfr-{{version}}.tar.gz",
+            "compression": "gzip"
+          }
+        },
+        "build": {
+          "configure-make-install": {
+            "configure": {
+              "prefix": {
+                "description": "install architecture-independent files in PREFIX",
+                "default": {
+                  "vendor": "/usr/local",
+                  "apt": "{{install path}}"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "mpc",
+    "type": "Scientific",
+    "latest": "1.0.1",
+    "versions": ["0.8.1"],
+    "install": {
+      "*": {
+        "get": {
+          "download": {
+            "url" : "http://www.multiprecision.org/mpc/download/mpc-{{version}}.tar.gz",
+            "compression": "gzip"
+          }
+        },
+        "build": {
+          "configure-make-install": {
+            "configure": {
+              "prefix": {
+                "description": "install architecture-independent files in PREFIX",
+                "default": {
+                  "vendor": "/usr/local",
+                  "apt": "{{install path}}"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "isl",
+    "type": "Scientific",
+    "latest": "1.0.1",
+    "versions": ["0.8.1"],
+    "install": {
+      "*": {
+        "get": {
+          "download": {
+            "url" : "http://www.multiprecision.org/mpc/download/mpc-{{version}}.tar.gz",
+            "compression": "gzip"
           }
         },
         "build": {

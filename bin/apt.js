@@ -10,42 +10,59 @@ var onMessage = require('../lib/helpers/onMessage');
 
 if ( ! action ) {
   var package = require('../package.json');
-  console.log('apt'.bold.white + (' version ' + package.version).grey);
-  console.log(package.description);
-  console.log(('Type ' + 'apt help'.italic + ' for help').grey);
-  console.log();
   var AptJson = new (require('../lib/AptJson'))(process.cwd());
-  if ( ! AptJson.FileExists || ! AptJson.Size ) {
-    console.log('No modules installed'.red);
+  if ( ! AptJson.FileExists ) {
+    console.log({});
   }
-  var available = require('../Store.json').length;
-  console.log((available + ' modules available in Store').green);
-  console.log();
-  console.log('Thank you for using apt'.italic + ' More info at github.com/co2/apt'.italic.grey);
+  else {
+    console.log(JSON.stringify(AptJson.Json, null, 2));
+  }
 } else {
   args.shift();
   switch ( action ) {
-    case 'view':
-      var Local = new (require('../lib/Local'))();
-      Local.get({}, function (error, modules) {
-        if ( error ) {
-          if ( error instanceof Error ) {
-            switch ( error.toString() ) {
-              case 'Error: apt.json not found':
-                return console.log('apt.json not found -- nothing installed so far here!');
-              default:
-                throw error;
-            }
-          }
+    case 'help':
+      var npm = require('../package.json');
+      console.log(JSON.stringify({ apt: {
+        version: npm.version,
+        actions: {
+          'view installed dependencies':  'apt ls',
+          'view if a dependency is installed': 'apt ls mysql',
+          'search store': 'apt store mysql',
+          'install dependency': 'apt install mysql',
+          'install dependency given version': 'apt install mysql@5.5.5',
+          'install dependency semantic version': [
+            'apt install mysql@5.x',
+            'apt install mysql@"5.5.x<>5.6.7"'],
+          'specify a configure directive': 'apt install mysql config.datadir=/data/mysql'
+        }
+      } }, null, 2));
+      break;
+    case 'check':
+      var check = {
+        'gcc': null
+      };
+
+      require('../lib/checkGcc')()
+        .on('error', function (error) {
           throw error;
-        }
-        if ( ! modules.length ) {
-          return console.log('Nothing installed so far here!'.blue);
-        }
-        console.log(JSON.stringify(modules, null, 2));
-      });
+        }.bind(this))
+
+        .on('done', function (found) {
+          check.gcc = found;
+          console.log(JSON.stringify(check, null, 2));
+        });
+      break;
+    
+    case 'ls':
+      var AptJson = new (require('../lib/AptJson'))(process.cwd());
+      if ( ! AptJson.FileExists ) {
+        console.log(JSON.stringify({}, null, 2));
+      } else {
+        console.log(JSON.stringify(AptJson.Dependencies, null, 2));
+      }
       break;
     case 'search':
+    case 'store':
       var found = [],
         where = {},
         search = require('../lib/search');

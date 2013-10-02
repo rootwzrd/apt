@@ -1,0 +1,73 @@
+{
+  "lab": [
+    {
+      "name": "node",
+      "latest": {
+        "scrape": {
+          "from": "http://nodejs.org/dist/latest/",
+          "search": "node-v(\\d+\\.\\d+\\.\\d+)\\.tar\\.gz",
+          "extract": 1,
+          "group": false
+        }
+      },
+      "expose": {
+        "scrape": {
+          "from": "http://nodejs.org/dist/",
+          "search": "href=\"v(\\d+\\.\\d+\\.\\d+)/\"",
+          "extract": 1,
+          "group": true
+        }
+      },
+      "install": {
+        "get": {
+          "download": {
+            "url": "http://nodejs.org/dist/v{{version}}/node-v{{version}}.tar.gz",
+            "shasum": {
+              "scrape": {
+                "from": "http://nodejs.org/dist/v{{version}}/SHASUMS.txt",
+                "search": "\\n([a-f0-9]+)\\s+node-v{{version}}.tar\\.gz",
+                "extract": 1,
+                "group": false
+              }
+            }
+          }
+        },
+        "build": {
+          "conf": {
+            "prefix": {
+              "type": "String",
+              "required": false,
+              "default": "{{apt.prefix}}"
+            }
+          },
+          "method": "posix"
+        }
+      }
+    },
+    {
+      "name": "mongodb",
+      "latest": {
+        "scrape": {
+          "from": "http://docs.mongodb.org/manual/release-notes/",
+          "search": "<meta name=\"release\" content=\"(.+)\"/>",
+          "extract": 1
+        }
+      },
+      "expose": {
+        "json": {
+          "from": "https://jira.mongodb.org/rest/api/2/project/SERVER/versions",
+          "version": "name",
+          "filter": [
+            "^\\d+\\.\\d+\\.\\d+$"]
+        }
+      }
+    }
+  ],
+  "station": [
+    {
+      "name": "node",
+      "versions": [ "0.10.17" ],
+      "version": "0.10.17"
+    }
+  ]
+}
