@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 for ( var args = [], i = 2; i < process.argv.length; i++ ) {
   args.push(process.argv[i]);
 }
@@ -6,7 +7,7 @@ var action = args[0];
 
 require('colors');
 
-var onMessage = require('../lib/helpers/onMessage');
+var apt = require('../main');
 
 if ( ! action ) {
   var package = require('../package.json');
@@ -25,34 +26,116 @@ if ( ! action ) {
       console.log(JSON.stringify({ apt: {
         version: npm.version,
         actions: {
-          'view installed dependencies':  'apt ls',
-          'view if a dependency is installed': 'apt ls mysql',
-          'search store': 'apt store mysql',
-          'install dependency': 'apt install mysql',
-          'install dependency given version': 'apt install mysql@5.5.5',
-          'install dependency semantic version': [
-            'apt install mysql@5.x',
-            'apt install mysql@"5.5.x<>5.6.7"'],
-          'specify a configure directive': 'apt install mysql config.datadir=/data/mysql'
+          'apt': {
+            'about': 'Display apt.json if found in working directory - empty object otherwise',
+            'example': 'apt',
+            'javascript': 'apt.info()',
+            'aliases': [ 'apt info' ]
+          },
+          'apt check': {
+            'about': 'Checkt that apt.json exists and has correct information',
+            'example': 'apt check',
+            'javascript': 'apt.check()',
+            'aliases': []
+          },
+          'apt init': {
+            'about': 'Install apt micro-os',
+            'example': 'apt init',
+            'javascript': 'apt.init()',
+            'aliases': []
+          },
+          'apt ls': {
+            'about': 'View installed dependencies if any',
+            'example': 'apt ls',
+            'javascript': "apt.ls()",
+            'aliases': []
+          },
+          'apt ls <dependency>': {
+            'about': 'View if <dependency> already installed',
+            'example': 'apt ls mysql',
+            'javascript': "apt.ls('mysql')",
+            'aliases': []
+          },
+          'apt store': {
+            'about': 'View available dependencies in Store',
+            'example': 'apt store',
+            'javascript': "apt.store()",
+            'aliases': []
+          },
+          'apt store <dependency>': {
+            'about': 'Search Store for given dependency',
+            'example': 'apt store mysql',
+            'javascript': "apt.store('mysql')",
+            'aliases': []
+          },
+          'apt install <dependency>': {
+            'about': 'Install given dependency',
+            'example': 'apt install mysql',
+            'javascript': "apt.install('mysql')",
+            'aliases': [],
+          },
+          'apt install <dependency> <config>': {
+            'about': 'Install given dependency with user parameters',
+            'example': 'apt install mysql config.datadir=/home/joe/data',
+            'javascript': "apt.install('mysql', { 'config': { 'datadir': '/home/joe/data' } })",
+            'aliases': [],
+          }
         }
       } }, null, 2));
       break;
     case 'check':
-      var check = {
-        'gcc': null
-      };
+      var check = apt.load('check')
+        // .on('message', apt.message)
 
-      require('../lib/checkGcc')()
         .on('error', function (error) {
-          throw error;
-        }.bind(this))
+          console.log('apt check returned errors'.red, error.toString().red);
+          if ( error instanceof Error ) {
+            throw error;
+          }
+          throw new Error(error);
+        })
 
-        .on('done', function (found) {
-          check.gcc = found;
-          console.log(JSON.stringify(check, null, 2));
+        .on('done', function (checks) {
+          var passed = 0,
+            failed = 0,
+            notdone = 0;
+          for ( var check in checks ) {
+            if ( checks[check] === true ) {
+              passed ++;
+            }
+            if ( checks[check] === false ) {
+              failed ++;
+            }
+            if ( checks[check] === null ) {
+              notdone ++;
+            }
+          }
+          console.log(('Checks: ' + (passed + failed + notdone) ).blue);
+          console.log(('Passed: ' + passed).green);
+          console.log(('Failed: ' + failed).red);
+          console.log(('Not checked: ' + notdone).grey);
+          JSON.stringify(checks, null, 2).split(/\n/)
+            .forEach(function (line) {
+              if ( line.match(/true,?$/) ) {
+                console.log(line.green);
+              }
+              else if ( line.match(/false,?$/) ) {
+                console.log(line.red);
+              }
+              else if ( line.match(/null,?$/) ) {
+                console.log(line.grey);
+              }
+              else {
+                console.log(line);
+              }
+            });
         });
       break;
     
+    case 'init':
+      
+      break;
+
     case 'ls':
       var AptJson = new (require('../lib/AptJson'))(process.cwd());
       if ( ! AptJson.FileExists ) {
@@ -61,6 +144,7 @@ if ( ! action ) {
         console.log(JSON.stringify(AptJson.Dependencies, null, 2));
       }
       break;
+    
     case 'search':
     case 'store':
       var found = [],
@@ -94,6 +178,7 @@ if ( ! action ) {
           });
         });
       break;
+    
     case 'install':
       var install = require('../lib/install'),
         installer = function (error, module) {
@@ -149,11 +234,14 @@ if ( ! action ) {
         });
       }
       else {
-        install(args[0])
-          .set('message prefix', ['Installing '.blue + args[0].bold.blue])
+        apt.load('install', args[0])
+
+          .on('message', apt.message)
+          
           .on('error', function (error) {
             throw error;
           })
+          
           .on('done', function (module) {
             console.log(module);
           });
