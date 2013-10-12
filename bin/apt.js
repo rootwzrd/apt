@@ -133,7 +133,14 @@ if ( ! action ) {
       break;
     
     case 'init':
-      
+      var init = apt.load('init')
+        .on('error', function (error) {
+          throw error;
+        })
+
+        .on('done', function () {
+          
+        });
       break;
 
     case 'ls':
