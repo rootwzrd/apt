@@ -3,11 +3,23 @@ for ( var args = [], i = 2; i < process.argv.length; i++ ) {
   args.push(process.argv[i]);
 }
 
-var action = args[0];
+var action = args.shift(),
+  apt = require('../main'),
+  prettyjson = require('prettyjson');
 
-require('colors');
+switch ( action ) {
+  case undefined:
+    apt('lib/json')
+      .on('error', function (error) {
+        console.error(error.toString().red);
+      })
+      .on('done', function (data) {
+        console.log(prettyjson.render(data));
+      });
+    break;
+}
 
-var apt = require('../main');
+return;
 
 if ( ! action ) {
   var package = require('../package.json');
