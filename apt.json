@@ -1,5 +1,8 @@
 {
-  "Path": "apt",
-  "Ignited": false,
-  "Dependencies": {}
+  "apt": {
+  	"version": "0.0.6"
+  },
+  "os": {
+  	"location": "apt"
+  }
 }

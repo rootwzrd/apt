@@ -2,12 +2,15 @@
 var assert = require('assert'),
   vows = require('vows'),
   path = require('path'),
-  main = require('../main'),
+  apt = require('../main'),
   json = require('../package.json'),
-  async = require('async');
+  async = require('async'),
+  cp = require('child_process');
 
 function printTitle (title) {
+  console.log();
   console.log(('» ' + title).blue);
+  console.log();
 }
 
 function printError (error) {
@@ -37,9 +40,9 @@ function batch (b, c) {
 }
 
 async.series({
-  'On getting JSON': function (callback) {
-    printTitle('On getting JSON');
-    main('lib/json')
+  'On getting JSON via script': function (callback) {
+    printTitle('On getting JSON via script');
+    apt.json()
       .on('error', callback)
       .on('done', function (done) {
         batch({
@@ -47,40 +50,97 @@ async.series({
              assert.isObject(done);
           },
           
-          'it should return the correct version': function () {
-             assert.strictEqual(done['apt version'], json.version);
+          'it should have info about apt': function () {
+            assert.isObject   (done.apt);
+            assert.isString   (done.apt.version);
           },
           
           'it should return the correct base': function () {
-            assert.strictEqual(done.base, main.$$properties.base);
+            assert.strictEqual(done.base, apt.get('base'));
           },
           
           'it should say wether there is a JSON file': function () {
-            assert.isBoolean(done['has JSON']);
-          },
-          
-          'it should have a dependencies list (even if empty)': function () {
-            assert.isObject(done.dependencies);
-          },
-          
-          'it should have a number of the dependencies': function () {
-            assert.isNumber(done['number of dependencies']);
-          },
-
-          'it should have a path': function () {
-            assert.isString(done.path);
-          },
-
-          'it should say wether the OS is present': function () {
-            assert.isBoolean(done.OS);
-          },
-
-          'it should have no more than 6 properties': function () {
-            assert.lengthOf(Object.keys(done), 7);
+            assert.isBoolean(done.json);
           }
         }, callback);
       });
-  }
+  },
+
+  'On getting JSON via CLI': function (callback) {
+    printTitle('On getting JSON via CLI');
+    var spawn = cp.spawn(path.join(path.dirname(__dirname), 'bin/apt.js'));
+    spawn.on('error', callback);
+    spawn.out = [];
+    spawn.err = [];
+    spawn.stdout.on('data', function (data) {
+      spawn.out.push(data.toString());
+    });
+    spawn.stderr.on('data', function (data) {
+      spawn.err.push(data.toString());
+    });
+    spawn.on('close', function (code) {
+      batch({
+        'it should be a zero status': function () {
+          assert.isZero(code);
+        },
+
+        'it should return a JSON object': function () {
+          assert.isObject(JSON.parse(spawn.out));
+        },
+
+        'it should have info about apt': function () {
+          assert.isObject   (JSON.parse(spawn.out).apt);
+          assert.isString   (JSON.parse(spawn.out).apt.version);
+        },
+        
+        'it should return the correct base': function () {
+          assert.strictEqual(JSON.parse(spawn.out).base, apt.get('base'));
+        },
+        
+        'it should say wether there is a JSON file': function () {
+          assert.isBoolean(JSON.parse(spawn.out).json);
+        }
+      }, callback);
+    });
+  },
+
+  'On getting help via script': function (callback) {
+    printTitle('On getting help via script');
+    apt.help()
+      .on('error', callback)
+      .on('done', function (done) {
+        batch({
+          'it should be an object': function () {
+             assert.isObject(done);
+          }
+        }, callback);
+      });
+  },
+
+  'On getting help via CLI': function (callback) {
+    printTitle('On getting help via CLI');
+    var spawn = cp.spawn(path.join(path.dirname(__dirname), 'bin/apt.js'), ['help']);
+    spawn.on('error', callback);
+    spawn.out = [];
+    spawn.err = [];
+    spawn.stdout.on('data', function (data) {
+      spawn.out.push(data.toString());
+    });
+    spawn.stderr.on('data', function (data) {
+      spawn.err.push(data.toString());
+    });
+    spawn.on('close', function (code) {
+      batch({
+        'it should be a zero status': function () {
+          assert.isZero(code);
+        },
+
+        'it should return a JSON object': function () {
+          assert.isObject(JSON.parse(spawn.out));
+        }
+      }, callback);
+    });
+  },
 }, function (error, results) {
   if ( error ) {
     return printError(error.toString());
